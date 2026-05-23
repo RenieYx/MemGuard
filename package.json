@@ -1,0 +1,59 @@
+{
+  "name": "memguard",
+  "version": "1.1.0",
+  "description": "Lightweight Windows memory guard with Codex MCP process cleanup.",
+  "author": "MemGuard",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis portable",
+    "pack": "electron-builder --dir"
+  },
+  "build": {
+    "appId": "local.memguard.app",
+    "productName": "MemGuard",
+    "asar": false,
+    "files": [
+      "src/**/*",
+      "engine/**/*",
+      "assets/**/*",
+      "README.md"
+    ],
+    "extraFiles": [
+      "Start-MemGuard.vbs",
+      "Install-or-Repair.bat",
+      "Uninstall.bat",
+      "Stop-MemGuard.ps1",
+      "Install-MemGuard.ps1",
+      "Install-Portable.ps1",
+      "Uninstall-MemGuard.ps1",
+      "Status-MemGuard.ps1",
+      "使用说明.txt"
+    ],
+    "win": {
+      "icon": "assets/memguard.ico",
+      "artifactName": "${productName}-V${version}-${arch}.${ext}",
+      "signAndEditExecutable": false,
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "guid": "38c7f744-07aa-5e8e-a081-2842a04c635a",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "artifactName": "${productName}-Setup-V${version}.${ext}",
+      "include": "build/installer.nsh",
+      "shortcutName": "MemGuard"
+    }
+  },
+  "devDependencies": {
+    "electron": "^39.2.4",
+    "electron-builder": "^26.0.12"
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+logs/
+data/
+*.log
+*.tmp
+*.bak
+last-trim.txt
+history.json
+config.json
+.DS_Store
+Thumbs.db

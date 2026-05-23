@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MemGuard 设置</title>
+  <link rel="stylesheet" href="./dashboard.css" />
+</head>
+<body>
+  <header class="titlebar">
+    <div class="brand">
+      <img src="../assets/tray.png" alt="" />
+      <span>MemGuard 设置</span>
+    </div>
+    <div class="window-controls">
+      <button id="minimizeWindow" type="button" aria-label="最小化">-</button>
+      <button id="closeWindow" type="button" aria-label="关闭">x</button>
+    </div>
+  </header>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <h1>MemGuard</h1>
+        <p id="subtitle">内存守护控制台</p>
+      </div>
+      <div class="actions">
+        <button id="refreshButton" type="button">刷新</button>
+        <button id="cleanButton" type="button">立即清理</button>
+      </div>
+    </header>
+
+    <section class="metrics">
+      <div class="metric main">
+        <span class="label">内存占用</span>
+        <strong id="usedPercent">--%</strong>
+        <div class="meter"><span id="meterFill"></span></div>
+      </div>
+      <div class="metric">
+        <span class="label">可用内存</span>
+        <strong id="freeGB">-- GB</strong>
+      </div>
+      <div class="metric">
+        <span class="label">上次清理</span>
+        <strong id="lastTrim">--</strong>
+      </div>
+    </section>
+
+    <section class="grid">
+      <form class="panel settings" id="settingsForm">
+        <div class="panel-head">
+          <h2>基础设置</h2>
+          <span id="saveState"></span>
+        </div>
+        <label>
+          自动清理阈值 %
+          <input name="triggerPercent" type="number" min="50" max="98" step="1" />
+        </label>
+        <label>
+          单进程最低内存 MB
+          <input name="minProcessMB" type="number" min="50" max="2048" step="10" />
+        </label>
+        <label>
+          自动清理冷却分钟
+          <input name="cooldownMinutes" type="number" min="1" max="240" step="1" />
+        </label>
+        <label>
+          检查间隔秒
+          <input name="checkSeconds" type="number" min="5" max="300" step="1" />
+        </label>
+        <label>
+          连续高占用确认次数
+          <input name="consecutiveHighChecks" type="number" min="1" max="10" step="1" />
+        </label>
+        <label>
+          历史记录上限
+          <input name="historyLimit" type="number" min="10" max="500" step="10" />
+        </label>
+        <label class="checkbox">
+          <input name="trimOnStart" type="checkbox" />
+          启动时先清理一次
+        </label>
+        <button class="save" type="submit">保存设置</button>
+      </form>
+
+      <section class="panel history">
+        <div class="panel-head">
+          <h2>最近清理</h2>
+          <div class="link-actions">
+            <button id="openHistoryButton" type="button">历史</button>
+            <button id="openLogsButton" type="button">日志</button>
+            <button id="openConfigButton" type="button">配置</button>
+          </div>
+        </div>
+        <div class="history-list" id="historyList"></div>
+      </section>
+    </section>
+
+    <section class="panel codex-guard">
+      <div class="panel-head">
+        <div>
+          <h2>Codex 守护</h2>
+          <p class="panel-note">识别 Codex Desktop 遗留的 MCP/node/cmd 工具链，保护当前对话，清理旧的重复残留。</p>
+        </div>
+        <div class="link-actions">
+          <button id="codexScanButton" type="button">扫描</button>
+          <button id="codexDryRunButton" type="button">预演</button>
+          <button id="codexCleanButton" type="button">清理残留</button>
+        </div>
+      </div>
+      <div class="codex-summary">
+        <div>
+          <span class="label">Codex 状态</span>
+          <strong id="codexRunning">--</strong>
+        </div>
+        <div>
+          <span class="label">MCP 候选</span>
+          <strong id="codexCandidates">--</strong>
+        </div>
+        <div>
+          <span class="label">可清理</span>
+          <strong id="codexCleanable">--</strong>
+        </div>
+        <div>
+          <span class="label">提交内存</span>
+          <strong id="codexCommit">--</strong>
+        </div>
+      </div>
+      <div id="codexStatus" class="codex-status">尚未扫描。</div>
+      <div class="codex-lists">
+        <section>
+          <h3>可清理</h3>
+          <div id="codexCleanableList" class="process-list"></div>
+        </section>
+        <section>
+          <h3>保护中</h3>
+          <div id="codexProtectedList" class="process-list"></div>
+        </section>
+        <section>
+          <h3>需人工确认</h3>
+          <div id="codexSuspiciousList" class="process-list"></div>
+        </section>
+      </div>
+    </section>
+  </main>
+  <script src="./dashboard.js"></script>
+</body>
+</html>

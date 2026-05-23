@@ -1,0 +1,26 @@
+{
+  "triggerPercent": 85,
+  "minProcessMB": 180,
+  "cooldownMinutes": 20,
+  "checkSeconds": 15,
+  "consecutiveHighChecks": 2,
+  "trimOnStart": true,
+  "historyLimit": 50,
+  "codexGuardEnabled": true,
+  "codexAutoCleanAfterCodexExit": true,
+  "codexCleanWhileRunning": "orphan-only",
+  "codexStaleMinutes": 10,
+  "codexMaxMcpProcesses": 40,
+  "codexCommitPressurePercent": 85,
+  "codexScanIntervalSeconds": 60,
+  "codexDryRunByDefault": true,
+  "codexKillAllowlist": [
+    "@shell-mcp/mcp-lite",
+    "shell-mcp-lite",
+    "@modelcontextprotocol/server-filesystem",
+    "@modelcontextprotocol/server-sequential-thinking",
+    "@modelcontextprotocol/server-memory",
+    "@modelcontextprotocol/server-fetch",
+    "node_repl.exe"
+  ]
+}

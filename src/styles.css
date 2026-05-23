@@ -1,0 +1,219 @@
+* {
+  box-sizing: border-box;
+  user-select: none;
+}
+
+html,
+body {
+  width: 240px;
+  height: 92px;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  font-family: "Segoe UI Variable Text", "Segoe UI", Arial, sans-serif;
+  -webkit-font-smoothing: auto;
+  text-rendering: optimizeLegibility;
+}
+
+.card {
+  position: relative;
+  width: 240px;
+  height: 92px;
+  margin: 0;
+  padding: 18px 14px 12px;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px;
+  grid-template-rows: 38px 24px;
+  column-gap: 12px;
+  row-gap: 0;
+  align-items: center;
+  border: 1px solid rgba(94, 234, 212, 0.52);
+  border-radius: 20px;
+  color: #fff;
+  background: linear-gradient(135deg, #111827 0%, #082f49 56%, #0f766e 100%);
+  -webkit-app-region: drag;
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: 19px;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(94, 234, 212, 0.24), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 44%);
+}
+
+.percent,
+.meta,
+.bar,
+.clean-button {
+  position: relative;
+  z-index: 1;
+}
+
+.percent {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: end;
+  min-width: 0;
+  color: #fff;
+  font-size: 31px;
+  font-weight: 800;
+  line-height: 34px;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  -webkit-text-stroke: 0.16px rgba(255, 255, 255, 0.6);
+}
+
+.meta {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  justify-self: end;
+  width: 72px;
+  padding-top: 0;
+  min-width: 0;
+}
+
+.free,
+.last {
+  width: 72px;
+  overflow: hidden;
+  text-align: right;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  letter-spacing: 0;
+}
+
+.free {
+  color: #d9f99d;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 17px;
+  -webkit-text-stroke: 0.1px rgba(217, 249, 157, 0.52);
+}
+
+.last {
+  margin-top: 1px;
+  color: #e0fbff;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 14px;
+  -webkit-text-stroke: 0.07px rgba(224, 251, 255, 0.34);
+}
+
+.card.feedback .last {
+  color: #fef08a;
+  animation: feedback-pop 520ms ease;
+}
+
+.bar {
+  grid-column: 1;
+  grid-row: 2;
+  align-self: center;
+  width: 100%;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(207, 250, 254, 0.24);
+}
+
+.fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #22d3ee, #34d399 58%, #a3e635);
+}
+
+.shine {
+  position: absolute;
+  top: -1px;
+  left: -34px;
+  width: 32px;
+  height: 7px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.44), transparent);
+  animation: shimmer 1.8s linear infinite;
+}
+
+.clean-button {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: center;
+  justify-self: end;
+  width: 68px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(217, 249, 157, 0.66);
+  border-radius: 999px;
+  color: #f7fee7;
+  background: rgba(20, 83, 45, 0.48);
+  font: 800 11px/22px "Segoe UI", Arial, sans-serif;
+  letter-spacing: 0;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background 140ms ease, border-color 140ms ease, transform 100ms ease;
+}
+
+.clean-button:hover {
+  background: rgba(22, 101, 52, 0.66);
+  border-color: rgba(217, 249, 157, 0.92);
+}
+
+.clean-button:active {
+  transform: translateY(1px);
+}
+
+.clean-button:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.card.cleaning .shine {
+  width: 46px;
+  animation-duration: 520ms;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.82), transparent);
+}
+
+.card.high .fill {
+  background: linear-gradient(90deg, #facc15, #fb923c, #f97316);
+}
+
+.card.paused .fill {
+  background: linear-gradient(90deg, #94a3b8, #cbd5e1);
+}
+
+.card.paused .shine {
+  animation-duration: 3.2s;
+  opacity: 0.55;
+}
+
+@keyframes shimmer {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(160px);
+  }
+}
+
+@keyframes feedback-pop {
+  0% {
+    transform: scale(0.94);
+    opacity: 0.45;
+  }
+  55% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
