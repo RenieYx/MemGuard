@@ -27,7 +27,7 @@ V1.2 的 Codex Guard 会：
 - 区分 Codex Desktop 主进程、desktop app-server、stdio app-server 和断链 MCP。
 - 按 `root 类型 + 工具 key` 分组，保护最新或仍挂在当前 Codex 树下的工具链。
 - 汇总候选组、可清理/保护/待确认数量、私有内存和工作集，避免把 Electron 多进程误读成单个软件异常。
-- 对旧的重复工具链、断链 shell MCP 做 dry-run、手动清理和运行中自动清理。
+- 对旧的重复工具链、旧会话断链 shell MCP、旧会话父链缺失工具做 dry-run、手动清理和运行中自动清理。
 - 清理前二次扫描并校验 PID、创建时间和归一化工具 key，降低 PID 复用误杀风险。
 - 不按进程名粗暴杀全部 `node.exe` 或 `cmd.exe`。
 - 不自动清理 Chrome、Vite、`npm run dev`、Playwright、Cloudflare tunnel 等用户项目进程。
@@ -38,7 +38,7 @@ V1.2 的 Codex Guard 会：
 - 每 20 分钟最多自动清理一次。
 - 只修剪工作集超过 180MB 的普通应用。
 - 启动时先执行一次温和清理。
-- Codex 运行中默认启用自动清理：只结束旧会话断链残留和旧的重复 desktop app-server 工具链，当前 stdio/app-server 链、最近启动链和无法确认的目标会被保护或列为“需人工确认”。
+- Codex 运行中默认启用自动清理：只结束旧会话断链残留、旧会话父链缺失工具和旧的重复 desktop app-server 工具链，当前 stdio/app-server 链、最近启动链和无法确认的目标会被保护或列为“需人工确认”。
 - Codex 运行中自动清理每 5 分钟最多触发一次，单轮最多结束 24 个目标；退出后残留仍会继续自动清理。
 
 ## 安装

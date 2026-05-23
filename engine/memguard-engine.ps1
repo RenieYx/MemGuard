@@ -488,13 +488,6 @@ function Get-CodexGuardScan {
         $chain = Get-ProcessChain $proc $byId
         $created = Convert-CimDate $proc.CreationDate
         $ageMinutes = if ($created) { (($now - $created).TotalMinutes) } else { 0 }
-        $rootName = if ($chain.root) { [string]$chain.root.name } else { '' }
-        $orphanGroup = ($null -ne $chain.missingParentPid -and $rootName -in @('node.exe', 'cmd.exe'))
-        $previousSessionOrphan = ($orphanGroup -and
-            $created -and
-            $codexPreviousSessionCutoff -and
-            $created -lt $codexPreviousSessionCutoff)
-
         if ($looksLikeDevServer -and -not $isAllowlisted) {
             $reportOnly += Convert-ProcessSummary $proc 'report-only' 'non-codex-dev-server-pattern' $chain
             continue
@@ -502,6 +495,17 @@ function Get-CodexGuardScan {
 
         $chainKind = Get-CodexChainKind $chain
         $toolKey = Get-CodexToolKey $cmd
+        $rootName = if ($chain.root) { [string]$chain.root.name } else { '' }
+        $orphanGroup = ($null -ne $chain.missingParentPid -and $rootName -in @('node.exe', 'cmd.exe'))
+        $previousSessionOrphan = ($orphanGroup -and
+            $created -and
+            $codexPreviousSessionCutoff -and
+            $created -lt $codexPreviousSessionCutoff)
+        $previousSessionMissingParentChain = ($null -ne $chain.missingParentPid -and
+            $chainKind -eq 'none' -and
+            $created -and
+            $codexSessionStartedAt -and
+            $created -lt $codexSessionStartedAt)
         $candidates += $proc
         $candidateRecords += [pscustomobject]@{
             process = $proc
@@ -511,6 +515,7 @@ function Get-CodexGuardScan {
             rootName = $rootName
             orphanGroup = $orphanGroup
             previousSessionOrphan = $previousSessionOrphan
+            previousSessionMissingParentChain = $previousSessionMissingParentChain
             chainKind = $chainKind
             toolKey = $toolKey
             duplicateKey = "${chainKind}|${toolKey}"
@@ -571,6 +576,9 @@ function Get-CodexGuardScan {
         } elseif ($record.orphanGroup -and $CodexCleanWhileRunning -in @('orphan-only', 'current-safe') -and $record.previousSessionOrphan) {
             $record.category = 'cleanable'
             $record.reason = 'previous-codex-session-orphan-while-running'
+        } elseif ($CodexCleanWhileRunning -eq 'current-safe' -and $record.previousSessionMissingParentChain) {
+            $record.category = 'cleanable'
+            $record.reason = 'previous-codex-session-missing-parent-chain-while-running'
         } elseif ($record.orphanGroup -and $CodexCleanWhileRunning -eq 'allow-stale') {
             $record.category = 'cleanable'
             $record.reason = 'allow-stale-orphan-while-codex-running'
@@ -802,6 +810,10 @@ function Invoke-CodexSelfTest {
         New-TestProcess 401 400 'node.exe' 'node.exe npm-cli.js exec @shell-mcp/mcp-lite' $currentSessionStart.AddMinutes(5) 40 100
         New-TestProcess 402 401 'cmd.exe' 'C:\Windows\system32\cmd.exe /d /s /c shell-mcp-lite' $currentSessionStart.AddMinutes(5) 5 5
 
+        New-TestProcess 900 7777 'cmd.exe' 'C:\Windows\system32\cmd.exe /d /s /c npx -y @shell-mcp/mcp-lite' $currentSessionStart.AddMinutes(-1) 5 5
+        New-TestProcess 901 900 'node.exe' 'node.exe npm-cli.js exec @shell-mcp/mcp-lite' $currentSessionStart.AddMinutes(-1) 40 100
+        New-TestProcess 902 901 'cmd.exe' 'C:\Windows\system32\cmd.exe /d /s /c shell-mcp-lite' $currentSessionStart.AddMinutes(-1) 5 5
+
         New-TestProcess 700 100 'codex.exe' '"C:\Program Files\WindowsApps\OpenAI.Codex_test\app\resources\codex.exe" app-server --analytics-default-enabled' $currentSessionStart.AddMinutes(1) 70 70
         New-TestProcess 710 700 'cmd.exe' 'C:\Windows\system32\cmd.exe /d /s /c npx -y @modelcontextprotocol/server-filesystem E:\claude code' $currentSessionStart.AddMinutes(2) 5 5
         New-TestProcess 711 710 'node.exe' 'node.exe npm-cli.js exec @modelcontextprotocol/server-filesystem E:\claude code' $currentSessionStart.AddMinutes(2) 40 120
@@ -824,6 +836,7 @@ function Invoke-CodexSelfTest {
     $assertions = @(
         [pscustomobject]@{ name = 'live codex chain protected'; passed = [bool]($scan.protected | Where-Object { $_.pid -eq 200 -or $_.pid -eq 201 -or $_.pid -eq 202 }) }
         [pscustomobject]@{ name = 'previous session orphan cleanable'; passed = [bool]($scan.cleanable | Where-Object { $_.pid -eq 300 -or $_.pid -eq 301 -or $_.pid -eq 302 }) }
+        [pscustomobject]@{ name = 'pre-session missing parent chain cleanable'; passed = [bool]($scan.cleanable | Where-Object { $_.pid -eq 900 -or $_.pid -eq 901 -or $_.pid -eq 902 }) }
         [pscustomobject]@{ name = 'current session orphan suspicious'; passed = [bool]($scan.suspicious | Where-Object { $_.pid -eq 400 -or $_.pid -eq 401 -or $_.pid -eq 402 }) }
         [pscustomobject]@{ name = 'old duplicate desktop app-server cleanable in current-safe'; passed = [bool]($scan.cleanable | Where-Object { $_.pid -eq 740 -or $_.pid -eq 741 }) }
         [pscustomobject]@{ name = 'report-only keeps running codex cleanable empty'; passed = (@($reportOnlyScan.cleanable).Count -eq 0) }

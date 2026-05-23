@@ -92,6 +92,7 @@ function reasonText(reason) {
     'duplicate-desktop-app-server-tool-pressure-not-met': '旧重复工具链，等待压力阈值',
     'codex-not-running-and-allowlisted-orphan': 'Codex 已退出的残留工具链',
     'previous-codex-session-orphan-while-running': '旧会话断链残留',
+    'previous-codex-session-missing-parent-chain-while-running': '旧会话父链缺失残留',
     'allow-stale-orphan-while-codex-running': '允许清理的过期断链工具',
     'allowlisted-stale-but-parent-chain-not-cleanable': '过期但父链不满足自动清理',
     'non-codex-dev-server-pattern': '开发服务器，仅报告'

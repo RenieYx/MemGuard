@@ -73,6 +73,7 @@ const defaultConfig = {
 
 const codexAutoCleanWhileRunningReasons = [
   'previous-codex-session-orphan-while-running',
+  'previous-codex-session-missing-parent-chain-while-running',
   'duplicate-desktop-app-server-tool'
 ];
 

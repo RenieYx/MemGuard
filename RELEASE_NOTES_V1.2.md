@@ -2,7 +2,7 @@
 
 ## Highlights
 
-- Added always-on Codex Guard cleanup while Codex is running, limited to old-session orphan chains and old duplicate desktop app-server tool chains so the current conversation stays protected; the default running cleanup cooldown is 5 minutes.
+- Added always-on Codex Guard cleanup while Codex is running, limited to old-session orphan chains, old missing-parent tool chains, and old duplicate desktop app-server tool chains so the current conversation stays protected; the default running cleanup cooldown is 5 minutes.
 - Added grouped Codex Guard reporting so the dashboard can show Codex MCP/tool families instead of only long per-process lists.
 - Added candidate memory totals for private memory and working set, making Electron/Codex multi-process memory easier to interpret.
 - Made normal working-set trimming safer by skipping active Codex, Electron/Chromium/browser/editor, and common Node tool processes.
