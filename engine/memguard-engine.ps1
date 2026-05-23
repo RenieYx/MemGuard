@@ -7,12 +7,19 @@ param(
     [int]$CodexStaleMinutes = 10,
     [int]$CodexMaxMcpProcesses = 40,
     [int]$CodexCommitPressurePercent = 85,
-    [string]$CodexCleanWhileRunning = 'orphan-only',
+    [string]$CodexCleanWhileRunning = 'current-safe',
+    [int]$CodexMaxKillsPerPass = 0,
+    [string]$CodexAllowedReasonsJson = '',
     [string]$CodexDryRun = 'true',
     [string]$CodexKillAllowlistJson = ''
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
+
+$validCodexCleanWhileRunningModes = @('report-only', 'orphan-only', 'current-safe', 'allow-stale')
+if ($validCodexCleanWhileRunningModes -notcontains $CodexCleanWhileRunning) {
+    $CodexCleanWhileRunning = 'current-safe'
+}
 
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 if ([string]::IsNullOrWhiteSpace($DataDir)) {
@@ -130,6 +137,21 @@ function Get-CodexAllowlist {
     return $fallback
 }
 
+function Get-CodexAllowedReasons {
+    if ([string]::IsNullOrWhiteSpace($CodexAllowedReasonsJson)) {
+        return @()
+    }
+
+    try {
+        $parsed = $CodexAllowedReasonsJson | ConvertFrom-Json
+        return @($parsed) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+            ForEach-Object { [string]$_ }
+    } catch {}
+
+    return @()
+}
+
 function Test-CommandContainsAny {
     param(
         [string]$CommandLine,
@@ -212,6 +234,101 @@ function Get-CodexToolKey {
         return 'node-repl'
     }
     return $normalized
+}
+
+function Get-CodexGroupLabel {
+    param(
+        [string]$ChainKind,
+        [string]$ToolKey
+    )
+
+    $root = switch ($ChainKind) {
+        'desktop-app-server' { 'Codex Desktop app-server' }
+        'stdio-app-server' { 'Codex stdio app-server' }
+        'desktop-root' { 'Codex desktop root' }
+        'codex-other' { 'Codex process tree' }
+        default { 'Detached tool chain' }
+    }
+
+    $tool = if ($ToolKey -match '^filesystem:') {
+        'filesystem MCP'
+    } elseif ($ToolKey -match '^sequential:') {
+        'sequential-thinking MCP'
+    } elseif ($ToolKey -match '^shell-mcp-lite:') {
+        'shell MCP'
+    } elseif ($ToolKey -eq 'node-repl') {
+        'node REPL'
+    } elseif ([string]::IsNullOrWhiteSpace($ToolKey)) {
+        'unknown tool'
+    } else {
+        $ToolKey
+    }
+
+    return "$root / $tool"
+}
+
+function Measure-ProcessMemoryMB {
+    param(
+        [object[]]$Processes,
+        [string]$Property
+    )
+
+    $sum = (@($Processes) | Measure-Object -Property $Property -Sum).Sum
+    if ($null -eq $sum) { $sum = 0 }
+    return [math]::Round(([double]$sum) / 1MB, 1)
+}
+
+function Test-SafeTrimSkipProcess {
+    param(
+        [object]$Process,
+        [string]$CommandLine = ''
+    )
+
+    if ($null -eq $Process) { return $true }
+
+    $name = ''
+    if ($Process.PSObject.Properties['ProcessName']) {
+        $name = [string]$Process.ProcessName
+    } elseif ($Process.PSObject.Properties['Name']) {
+        $name = ([string]$Process.Name) -replace '\.exe$', ''
+    }
+
+    if ($name -in @('Codex', 'codex', 'chrome', 'msedge', 'electron', 'Code', 'Cursor')) {
+        return $true
+    }
+
+    $cmd = [string]$CommandLine
+    if ([string]::IsNullOrWhiteSpace($cmd) -and $Process.PSObject.Properties['CommandLine']) {
+        $cmd = [string]$Process.CommandLine
+    }
+
+    if ($cmd.IndexOf('OpenAI.Codex_', [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+        $cmd.IndexOf('\OpenAI\Codex\', [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+        $cmd.IndexOf('--type=renderer', [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+        $cmd.IndexOf('--type=gpu-process', [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+        $cmd.IndexOf('--type=utility', [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+        $cmd.IndexOf('--type=crashpad-handler', [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+        $cmd.IndexOf('Electron', [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+        $cmd.IndexOf('Chromium', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        return $true
+    }
+
+    if ($name -eq 'node') {
+        if ([string]::IsNullOrWhiteSpace($cmd)) { return $true }
+        return (Test-CommandContainsAny $cmd @(
+            'node_modules',
+            'npm-cli.js',
+            'npx-cli.js',
+            'vite\bin\vite',
+            '@modelcontextprotocol/',
+            '@shell-mcp/mcp-lite',
+            'node_repl',
+            'playwright',
+            'cloudflared'
+        ))
+    }
+
+    return $false
 }
 
 function Get-ProcessChain {
@@ -429,7 +546,10 @@ function Get-CodexGuardScan {
             if ($ageMinutes -lt $CodexStaleMinutes) {
                 $record.category = 'protected'
                 $record.reason = "desktop-app-server-younger-than-${CodexStaleMinutes}m"
-            } elseif ($isDuplicateOld -and ($pressureHigh -or $candidates.Count -gt $CodexMaxMcpProcesses -or $CodexCleanWhileRunning -eq 'allow-stale')) {
+            } elseif ($isDuplicateOld -and $CodexCleanWhileRunning -eq 'report-only') {
+                $record.category = 'suspicious'
+                $record.reason = 'duplicate-desktop-app-server-tool-report-only'
+            } elseif ($isDuplicateOld -and ($pressureHigh -or $candidates.Count -gt $CodexMaxMcpProcesses -or $CodexCleanWhileRunning -eq 'allow-stale' -or $CodexCleanWhileRunning -eq 'current-safe')) {
                 $record.category = 'cleanable'
                 $record.reason = 'duplicate-desktop-app-server-tool'
             } elseif ($isDuplicateOld) {
@@ -448,7 +568,7 @@ function Get-CodexGuardScan {
         } elseif ($record.orphanGroup -and -not $codexRunning) {
             $record.category = 'cleanable'
             $record.reason = 'codex-not-running-and-allowlisted-orphan'
-        } elseif ($record.orphanGroup -and $CodexCleanWhileRunning -eq 'orphan-only' -and $record.previousSessionOrphan) {
+        } elseif ($record.orphanGroup -and $CodexCleanWhileRunning -in @('orphan-only', 'current-safe') -and $record.previousSessionOrphan) {
             $record.category = 'cleanable'
             $record.reason = 'previous-codex-session-orphan-while-running'
         } elseif ($record.orphanGroup -and $CodexCleanWhileRunning -eq 'allow-stale') {
@@ -469,15 +589,16 @@ function Get-CodexGuardScan {
         }
     }
 
-    $candidateWorkingSet = [math]::Round((($candidates | Measure-Object WorkingSetSize -Sum).Sum) / 1MB, 1)
-    $candidatePrivate = [math]::Round((($candidates | Measure-Object PrivatePageCount -Sum).Sum) / 1MB, 1)
-    $duplicateGroups = @($candidateRecords |
+    $candidateWorkingSet = Measure-ProcessMemoryMB $candidates 'WorkingSetSize'
+    $candidatePrivate = Measure-ProcessMemoryMB $candidates 'PrivatePageCount'
+    $candidateGroups = @($candidateRecords |
         Group-Object -Property duplicateKey |
-        Where-Object { $_.Count -gt 1 } |
         ForEach-Object {
             $items = @($_.Group)
+            $orderedItems = @($items | Sort-Object @{ Expression = { if ($_.category -eq 'cleanable') { 0 } elseif ($_.category -eq 'suspicious') { 1 } else { 2 } } }, @{ Expression = 'ageMinutes'; Descending = $true })
             [pscustomobject]@{
                 key = $_.Name
+                label = Get-CodexGroupLabel ($items[0].chainKind) ($items[0].toolKey)
                 toolKey = $items[0].toolKey
                 chainKind = $items[0].chainKind
                 count = $_.Count
@@ -486,7 +607,33 @@ function Get-CodexGuardScan {
                 cleanableCount = @($items | Where-Object { $_.category -eq 'cleanable' }).Count
                 oldestAgeMinutes = [math]::Round((($items | Measure-Object ageMinutes -Maximum).Maximum), 1)
                 newestAgeMinutes = [math]::Round((($items | Measure-Object ageMinutes -Minimum).Minimum), 1)
-                privateMB = [math]::Round((($items.process | Measure-Object PrivatePageCount -Sum).Sum) / 1MB, 1)
+                workingSetMB = Measure-ProcessMemoryMB @($items | ForEach-Object { $_.process }) 'WorkingSetSize'
+                privateMB = Measure-ProcessMemoryMB @($items | ForEach-Object { $_.process }) 'PrivatePageCount'
+                items = @($orderedItems | Select-Object -First 18 | ForEach-Object {
+                    Convert-ProcessSummary $_.process $_.category $_.reason $_.chain $_.chainKind $_.toolKey $_.duplicateRank $_.duplicateCount
+                })
+            }
+        } |
+        Sort-Object cleanableCount, privateMB, count -Descending |
+        Select-Object -First 60)
+    $duplicateGroups = @($candidateRecords |
+        Group-Object -Property duplicateKey |
+        Where-Object { $_.Count -gt 1 } |
+        ForEach-Object {
+            $items = @($_.Group)
+            [pscustomobject]@{
+                key = $_.Name
+                label = Get-CodexGroupLabel ($items[0].chainKind) ($items[0].toolKey)
+                toolKey = $items[0].toolKey
+                chainKind = $items[0].chainKind
+                count = $_.Count
+                protectedCount = @($items | Where-Object { $_.category -eq 'protected' }).Count
+                suspiciousCount = @($items | Where-Object { $_.category -eq 'suspicious' }).Count
+                cleanableCount = @($items | Where-Object { $_.category -eq 'cleanable' }).Count
+                oldestAgeMinutes = [math]::Round((($items | Measure-Object ageMinutes -Maximum).Maximum), 1)
+                newestAgeMinutes = [math]::Round((($items | Measure-Object ageMinutes -Minimum).Minimum), 1)
+                workingSetMB = Measure-ProcessMemoryMB @($items | ForEach-Object { $_.process }) 'WorkingSetSize'
+                privateMB = Measure-ProcessMemoryMB @($items | ForEach-Object { $_.process }) 'PrivatePageCount'
                 chainKinds = @($items | Select-Object -ExpandProperty chainKind -Unique)
             }
         } |
@@ -527,12 +674,14 @@ function Get-CodexGuardScan {
             reportOnlyCount = $reportOnly.Count
             candidateWorkingSetMB = $candidateWorkingSet
             candidatePrivateMB = $candidatePrivate
+            candidateGroupCount = $candidateGroups.Count
             duplicateGroupCount = $duplicateGroups.Count
             desktopAppServerCandidateCount = @($candidateRecords | Where-Object { $_.chainKind -eq 'desktop-app-server' }).Count
             stdioAppServerCandidateCount = @($candidateRecords | Where-Object { $_.chainKind -eq 'stdio-app-server' }).Count
             overProcessLimit = $candidates.Count -gt $CodexMaxMcpProcesses
             overCommitPressure = $snapshot.commitPercent -ge $CodexCommitPressurePercent
         }
+        candidateGroups = $candidateGroups
         duplicateGroups = $duplicateGroups
         protected = @($protected | Sort-Object workingSetMB -Descending | Select-Object -First 80)
         suspicious = @($suspicious | Sort-Object workingSetMB -Descending | Select-Object -First 80)
@@ -544,8 +693,15 @@ function Get-CodexGuardScan {
 function Invoke-CodexClean {
     $dryRun = Convert-ToBool $CodexDryRun $true
     $before = Get-CodexGuardScan
+    $allowedReasons = @(Get-CodexAllowedReasons)
     $targets = @($before.cleanable)
-    Write-Log "Codex clean start: reason=$Reason dryRun=$dryRun targets=$($targets.Count) codexRunning=$($before.codex.running) commit=$($before.snapshot.commitPercent)%"
+    if ($allowedReasons.Count -gt 0) {
+        $targets = @($targets | Where-Object { $allowedReasons -contains $_.reason })
+    }
+    if ($CodexMaxKillsPerPass -gt 0) {
+        $targets = @($targets | Select-Object -First $CodexMaxKillsPerPass)
+    }
+    Write-Log "Codex clean start: reason=$Reason dryRun=$dryRun targets=$($targets.Count) codexRunning=$($before.codex.running) commit=$($before.snapshot.commitPercent)% allowedReasons=$($allowedReasons -join ',') maxKills=$CodexMaxKillsPerPass"
 
     $killed = @()
     $failed = @()
@@ -553,7 +709,11 @@ function Invoke-CodexClean {
     if (-not $dryRun) {
         $freshScan = Get-CodexGuardScan
         $freshByIdentity = @{}
-        foreach ($freshTarget in @($freshScan.cleanable)) {
+        $freshTargets = @($freshScan.cleanable)
+        if ($allowedReasons.Count -gt 0) {
+            $freshTargets = @($freshTargets | Where-Object { $allowedReasons -contains $_.reason })
+        }
+        foreach ($freshTarget in $freshTargets) {
             $freshByIdentity["$($freshTarget.pid)|$($freshTarget.createdAt)|$($freshTarget.toolKey)"] = $freshTarget
         }
 
@@ -642,16 +802,38 @@ function Invoke-CodexSelfTest {
         New-TestProcess 401 400 'node.exe' 'node.exe npm-cli.js exec @shell-mcp/mcp-lite' $currentSessionStart.AddMinutes(5) 40 100
         New-TestProcess 402 401 'cmd.exe' 'C:\Windows\system32\cmd.exe /d /s /c shell-mcp-lite' $currentSessionStart.AddMinutes(5) 5 5
 
+        New-TestProcess 700 100 'codex.exe' '"C:\Program Files\WindowsApps\OpenAI.Codex_test\app\resources\codex.exe" app-server --analytics-default-enabled' $currentSessionStart.AddMinutes(1) 70 70
+        New-TestProcess 710 700 'cmd.exe' 'C:\Windows\system32\cmd.exe /d /s /c npx -y @modelcontextprotocol/server-filesystem E:\claude code' $currentSessionStart.AddMinutes(2) 5 5
+        New-TestProcess 711 710 'node.exe' 'node.exe npm-cli.js exec @modelcontextprotocol/server-filesystem E:\claude code' $currentSessionStart.AddMinutes(2) 40 120
+        New-TestProcess 720 700 'cmd.exe' 'C:\Windows\system32\cmd.exe /d /s /c npx -y @modelcontextprotocol/server-filesystem E:\claude code' $currentSessionStart.AddMinutes(-5) 5 5
+        New-TestProcess 721 720 'node.exe' 'node.exe npm-cli.js exec @modelcontextprotocol/server-filesystem E:\claude code' $currentSessionStart.AddMinutes(-5) 40 120
+        New-TestProcess 730 700 'cmd.exe' 'C:\Windows\system32\cmd.exe /d /s /c npx -y @modelcontextprotocol/server-filesystem E:\claude code' $currentSessionStart.AddMinutes(-10) 5 5
+        New-TestProcess 731 730 'node.exe' 'node.exe npm-cli.js exec @modelcontextprotocol/server-filesystem E:\claude code' $currentSessionStart.AddMinutes(-10) 40 120
+        New-TestProcess 740 700 'cmd.exe' 'C:\Windows\system32\cmd.exe /d /s /c npx -y @modelcontextprotocol/server-filesystem E:\claude code' $currentSessionStart.AddMinutes(-15) 5 5
+        New-TestProcess 741 740 'node.exe' 'node.exe npm-cli.js exec @modelcontextprotocol/server-filesystem E:\claude code' $currentSessionStart.AddMinutes(-15) 40 120
+
         New-TestProcess 500 1 'cmd.exe' 'cmd.exe /c npm run dev' $currentSessionStart.AddMinutes(-10) 5 5
         New-TestProcess 501 500 'node.exe' 'node.exe E:\project\node_modules\vite\bin\vite.js --host 127.0.0.1' $currentSessionStart.AddMinutes(-10) 100 200
     )
 
     $scan = Get-CodexGuardScan -InputProcesses $processes -InputSnapshot $snapshot -InputNow $now
+    $originalMode = $CodexCleanWhileRunning
+    $CodexCleanWhileRunning = 'report-only'
+    $reportOnlyScan = Get-CodexGuardScan -InputProcesses $processes -InputSnapshot $snapshot -InputNow $now
+    $CodexCleanWhileRunning = $originalMode
     $assertions = @(
         [pscustomobject]@{ name = 'live codex chain protected'; passed = [bool]($scan.protected | Where-Object { $_.pid -eq 200 -or $_.pid -eq 201 -or $_.pid -eq 202 }) }
         [pscustomobject]@{ name = 'previous session orphan cleanable'; passed = [bool]($scan.cleanable | Where-Object { $_.pid -eq 300 -or $_.pid -eq 301 -or $_.pid -eq 302 }) }
         [pscustomobject]@{ name = 'current session orphan suspicious'; passed = [bool]($scan.suspicious | Where-Object { $_.pid -eq 400 -or $_.pid -eq 401 -or $_.pid -eq 402 }) }
+        [pscustomobject]@{ name = 'old duplicate desktop app-server cleanable in current-safe'; passed = [bool]($scan.cleanable | Where-Object { $_.pid -eq 740 -or $_.pid -eq 741 }) }
+        [pscustomobject]@{ name = 'report-only keeps running codex cleanable empty'; passed = (@($reportOnlyScan.cleanable).Count -eq 0) }
         [pscustomobject]@{ name = 'vite dev server report-only'; passed = [bool]($scan.reportOnly | Where-Object { $_.pid -eq 500 -or $_.pid -eq 501 }) }
+        [pscustomobject]@{ name = 'candidate groups include all groups'; passed = ($scan.summary.candidateGroupCount -ge 3 -and @($scan.candidateGroups).Count -eq $scan.summary.candidateGroupCount) }
+        [pscustomobject]@{ name = 'candidate groups expose memory totals'; passed = [bool]($scan.candidateGroups | Where-Object { $_.cleanableCount -gt 0 -and $_.privateMB -gt 0 -and $_.workingSetMB -gt 0 } | Select-Object -First 1) }
+        [pscustomobject]@{ name = 'safe trim skips codex desktop'; passed = (Test-SafeTrimSkipProcess (New-TestProcess 600 1 'Codex.exe' '"C:\Program Files\WindowsApps\OpenAI.Codex_test\app\Codex.exe" --type=renderer' $now 500 500) '') }
+        [pscustomobject]@{ name = 'safe trim skips electron renderer'; passed = (Test-SafeTrimSkipProcess (New-TestProcess 601 1 'electron.exe' '"D:\app\electron.exe" --type=gpu-process' $now 500 500) '') }
+        [pscustomobject]@{ name = 'safe trim skips node dev tool'; passed = (Test-SafeTrimSkipProcess (New-TestProcess 602 1 'node.exe' '"D:\nodejs\node.exe" "D:\project\node_modules\vite\bin\vite.js"' $now 500 500) '') }
+        [pscustomobject]@{ name = 'safe trim allows ordinary app'; passed = -not (Test-SafeTrimSkipProcess (New-TestProcess 603 1 'notepad.exe' '"C:\Windows\System32\notepad.exe"' $now 500 500) '') }
     )
 
     [pscustomobject]@{
@@ -692,7 +874,7 @@ function Invoke-Trim {
         $foregroundPid = [int]$foregroundPidRef
     }
 
-    $candidates = Get-Process |
+    $rawCandidates = @(Get-Process |
         Where-Object {
             $_.Id -gt 4 -and
             $_.Id -ne $currentPid -and
@@ -701,7 +883,30 @@ function Invoke-Trim {
             $skipNames -notcontains $_.ProcessName
         } |
         Sort-Object WorkingSet64 -Descending |
-        Select-Object -First 24
+        Select-Object -First 48)
+
+    $candidatePidSet = @{}
+    foreach ($candidate in $rawCandidates) {
+        $candidatePidSet[[int]$candidate.Id] = $true
+    }
+    $candidateCommandLines = @{}
+    if ($candidatePidSet.Count -gt 0) {
+        foreach ($wmiProc in @(Get-CimInstance Win32_Process | Where-Object { $candidatePidSet.ContainsKey([int]$_.ProcessId) })) {
+            $candidateCommandLines[[int]$wmiProc.ProcessId] = [string]$wmiProc.CommandLine
+        }
+    }
+
+    $skippedSensitive = 0
+    $candidates = @()
+    foreach ($candidate in $rawCandidates) {
+        $cmd = if ($candidateCommandLines.ContainsKey([int]$candidate.Id)) { $candidateCommandLines[[int]$candidate.Id] } else { '' }
+        if (Test-SafeTrimSkipProcess $candidate $cmd) {
+            $skippedSensitive++
+            continue
+        }
+        $candidates += $candidate
+        if ($candidates.Count -ge 24) { break }
+    }
 
     foreach ($proc in $candidates) {
         try {
@@ -727,6 +932,7 @@ function Invoke-Trim {
         trimmedProcesses = $trimmed
         freedGB = $freedGB
         skippedForegroundPid = $foregroundPid
+        skippedSensitiveProcesses = $skippedSensitive
     }
 }
 

@@ -7,12 +7,16 @@
   "trimOnStart": true,
   "historyLimit": 50,
   "codexGuardEnabled": true,
+  "codexPolicyVersion": 2,
   "codexAutoCleanAfterCodexExit": true,
-  "codexCleanWhileRunning": "orphan-only",
+  "codexAutoCleanWhileRunning": true,
+  "codexCleanWhileRunning": "current-safe",
   "codexStaleMinutes": 10,
   "codexMaxMcpProcesses": 40,
   "codexCommitPressurePercent": 85,
   "codexScanIntervalSeconds": 60,
+  "codexAutoCleanWhileRunningCooldownMinutes": 5,
+  "codexAutoCleanWhileRunningMaxKillsPerPass": 24,
   "codexDryRunByDefault": true,
   "codexKillAllowlist": [
     "@shell-mcp/mcp-lite",
@@ -20,7 +24,10 @@
     "@modelcontextprotocol/server-filesystem",
     "@modelcontextprotocol/server-sequential-thinking",
     "@modelcontextprotocol/server-memory",
+    "@modelcontextprotocol/server-everything",
     "@modelcontextprotocol/server-fetch",
+    "@modelcontextprotocol/server-git",
+    "@modelcontextprotocol/server-puppeteer",
     "node_repl.exe"
   ]
 }

@@ -16,12 +16,20 @@ const codexDryRunButton = document.getElementById('codexDryRunButton');
 const codexCleanButton = document.getElementById('codexCleanButton');
 const codexRunning = document.getElementById('codexRunning');
 const codexCandidates = document.getElementById('codexCandidates');
+const codexCandidateMemory = document.getElementById('codexCandidateMemory');
 const codexCleanable = document.getElementById('codexCleanable');
 const codexCommit = document.getElementById('codexCommit');
 const codexStatus = document.getElementById('codexStatus');
+const codexGroupMeta = document.getElementById('codexGroupMeta');
+const codexGroupList = document.getElementById('codexGroupList');
+const codexCleanableCount = document.getElementById('codexCleanableCount');
+const codexProtectedCount = document.getElementById('codexProtectedCount');
+const codexSuspiciousCount = document.getElementById('codexSuspiciousCount');
 const codexCleanableList = document.getElementById('codexCleanableList');
 const codexProtectedList = document.getElementById('codexProtectedList');
 const codexSuspiciousList = document.getElementById('codexSuspiciousList');
+
+let currentConfig = {};
 
 function lastText(iso) {
   if (!iso) return '--';
@@ -48,6 +56,7 @@ function fillForm(config) {
 function formConfig() {
   const data = new FormData(settingsForm);
   return {
+    ...currentConfig,
     triggerPercent: Number(data.get('triggerPercent')),
     minProcessMB: Number(data.get('minProcessMB')),
     cooldownMinutes: Number(data.get('cooldownMinutes')),
@@ -55,14 +64,9 @@ function formConfig() {
     consecutiveHighChecks: Number(data.get('consecutiveHighChecks')),
     historyLimit: Number(data.get('historyLimit')),
     trimOnStart: settingsForm.elements.trimOnStart.checked,
-    codexGuardEnabled: true,
-    codexAutoCleanAfterCodexExit: true,
-    codexCleanWhileRunning: 'orphan-only',
-    codexStaleMinutes: 10,
-    codexMaxMcpProcesses: 40,
-    codexCommitPressurePercent: 85,
-    codexScanIntervalSeconds: 60,
-    codexDryRunByDefault: true
+    codexAutoCleanWhileRunning: settingsForm.elements.codexAutoCleanWhileRunning.checked,
+    codexAutoCleanWhileRunningCooldownMinutes: Number(data.get('codexAutoCleanWhileRunningCooldownMinutes')),
+    codexAutoCleanWhileRunningMaxKillsPerPass: Number(data.get('codexAutoCleanWhileRunningMaxKillsPerPass'))
   };
 }
 
@@ -76,6 +80,7 @@ function reasonText(reason) {
     'codex-dry-run': 'Codex 预演',
     'codex-manual': 'Codex 清理',
     'codex-auto-after-exit': 'Codex 退出后自动清理',
+    'codex-auto-while-running': 'Codex 运行中自动清理',
     'emergency-previous-session-orphans': '紧急清理旧会话残留',
     'live-stdio-app-server': '当前 stdio app-server，已保护',
     'live-desktop-root': '当前 Codex 桌面树，已保护',
@@ -83,6 +88,7 @@ function reasonText(reason) {
     'desktop-app-server-younger-than-10m': '最近启动的桌面 app-server 工具，已保护',
     'live-desktop-app-server-latest-or-singleton': '最新或单例工具，已保护',
     'duplicate-desktop-app-server-tool': '桌面 app-server 下的旧重复工具链',
+    'duplicate-desktop-app-server-tool-report-only': '旧重复工具链，报告模式不清理',
     'duplicate-desktop-app-server-tool-pressure-not-met': '旧重复工具链，等待压力阈值',
     'codex-not-running-and-allowlisted-orphan': 'Codex 已退出的残留工具链',
     'previous-codex-session-orphan-while-running': '旧会话断链残留',
@@ -130,6 +136,7 @@ function renderHistory(history) {
 function renderState(state) {
   const snapshot = state.snapshot || {};
   const percent = Number(snapshot.usedPercent || 0);
+  currentConfig = state.config || {};
   usedPercent.textContent = `${percent.toFixed(1)}%`;
   freeGB.textContent = `${Number(snapshot.freeGB || 0).toFixed(1)} GB`;
   lastTrim.textContent = lastText(snapshot.lastTrim);
@@ -145,6 +152,13 @@ async function refresh() {
 
 function processTitle(item) {
   return `${item.name || '进程'} #${item.pid} / ${Number(item.workingSetMB || 0).toFixed(1)} MB`;
+}
+
+function formatMB(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return '--';
+  if (number >= 1024) return `${(number / 1024).toFixed(1)} GB`;
+  return `${number.toFixed(0)} MB`;
 }
 
 function renderProcessList(container, items, emptyText) {
@@ -176,22 +190,62 @@ function renderProcessList(container, items, emptyText) {
   }
 }
 
+function renderGroupList(groups) {
+  codexGroupList.innerHTML = '';
+  const list = Array.isArray(groups) ? groups : [];
+  const shown = Math.min(list.length, 8);
+  codexGroupMeta.textContent = list.length ? `显示 ${shown} / ${list.length} 组` : '暂无分组';
+  if (!list.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = '还没有候选工具分组。';
+    codexGroupList.append(empty);
+    return;
+  }
+
+  for (const group of list.slice(0, 8)) {
+    const row = document.createElement('div');
+    row.className = 'group-item';
+
+    const title = document.createElement('strong');
+    title.textContent = group.label || group.toolKey || group.key || '工具分组';
+
+    const meta = document.createElement('span');
+    meta.textContent = `${group.count || 0} 个进程 / 可清理 ${group.cleanableCount || 0} / 保护 ${group.protectedCount || 0} / 待确认 ${group.suspiciousCount || 0}`;
+
+    const memory = document.createElement('code');
+    memory.textContent = `私有 ${formatMB(group.privateMB)} / 工作集 ${formatMB(group.workingSetMB)}`;
+
+    row.append(title, meta, memory);
+    codexGroupList.append(row);
+  }
+}
+
 function renderCodexScan(scan, statusText) {
   const summary = scan && scan.summary ? scan.summary : {};
   const codex = scan && scan.codex ? scan.codex : {};
   const snapshot = scan && scan.snapshot ? scan.snapshot : {};
+  const hasPressure = Boolean(summary.overProcessLimit || summary.overCommitPressure);
+  const hasCleanable = Number(summary.cleanableCount || 0) > 0;
 
   codexRunning.textContent = codex.running ? `${codex.count || 0} 个进程` : '未运行';
   codexCandidates.textContent = String(summary.candidateCount ?? '--');
+  codexCandidateMemory.textContent = `私有 ${formatMB(summary.candidatePrivateMB)} / 工作集 ${formatMB(summary.candidateWorkingSetMB)}`;
   codexCleanable.textContent = String(summary.cleanableCount ?? '--');
   codexCommit.textContent = snapshot.commitPercent == null ? '--' : `${Number(snapshot.commitPercent).toFixed(1)}%`;
+  codexCleanableCount.textContent = String(summary.cleanableCount ?? 0);
+  codexProtectedCount.textContent = String(summary.protectedCount ?? 0);
+  codexSuspiciousCount.textContent = String(summary.suspiciousCount ?? 0);
 
-  const pressure = summary.overProcessLimit || summary.overCommitPressure ? '检测到压力。' : '';
+  const pressure = hasPressure ? '检测到压力。' : '';
   const appServerText = `桌面 app-server ${codex.desktopAppServerCount ?? 0} 个，stdio app-server ${codex.stdioAppServerCount ?? 0} 个`;
-  const groupText = `重复组 ${summary.duplicateGroupCount ?? 0} 个`;
+  const groupText = `候选组 ${summary.candidateGroupCount ?? 0} 个，重复组 ${summary.duplicateGroupCount ?? 0} 个`;
   const detailText = `${summary.cleanableCount || 0} 个可清理，${summary.protectedCount || 0} 个保护中，${summary.suspiciousCount || 0} 个需确认。`;
-  codexStatus.textContent = statusText || `${pressure}${appServerText}，${groupText}，${detailText}`;
+  const memoryText = `候选私有 ${formatMB(summary.candidatePrivateMB)}，工作集 ${formatMB(summary.candidateWorkingSetMB)}。`;
+  codexStatus.className = `codex-status ${hasCleanable ? 'is-actionable' : 'is-clear'} ${hasPressure ? 'is-pressure' : ''}`;
+  codexStatus.textContent = statusText || `${pressure}${appServerText}，${groupText}，${detailText}${memoryText}`;
 
+  renderGroupList(scan.candidateGroups);
   renderProcessList(codexCleanableList, scan.cleanable, '没有可清理的过期残留。');
   renderProcessList(codexProtectedList, scan.protected, '没有正在保护的 Codex 工具进程。');
   renderProcessList(codexSuspiciousList, scan.suspicious, '没有需要人工确认的进程。');
@@ -201,6 +255,7 @@ async function runCodexAction(action) {
   for (const button of [codexScanButton, codexDryRunButton, codexCleanButton]) button.disabled = true;
   try {
     const actionText = { scan: '正在扫描', 'dry-run': '正在预演', clean: '正在清理' }[action] || '处理中';
+    codexStatus.className = 'codex-status is-busy';
     codexStatus.textContent = `${actionText}...`;
     if (action === 'scan') {
       renderCodexScan(await window.memguard.codexScan(), '扫描完成。');
@@ -219,6 +274,7 @@ async function runCodexAction(action) {
       await refresh();
     }
   } catch (error) {
+    codexStatus.className = 'codex-status is-error';
     codexStatus.textContent = error && error.message ? error.message : String(error);
   } finally {
     for (const button of [codexScanButton, codexDryRunButton, codexCleanButton]) button.disabled = false;

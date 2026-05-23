@@ -79,6 +79,18 @@
           <input name="trimOnStart" type="checkbox" />
           启动时先清理一次
         </label>
+        <label class="checkbox">
+          <input name="codexAutoCleanWhileRunning" type="checkbox" />
+          Codex 运行中自动清理旧会话
+        </label>
+        <label>
+          Codex 自动清理冷却分钟
+          <input name="codexAutoCleanWhileRunningCooldownMinutes" type="number" min="1" max="240" step="1" />
+        </label>
+        <label>
+          Codex 单轮最多结束
+          <input name="codexAutoCleanWhileRunningMaxKillsPerPass" type="number" min="1" max="100" step="1" />
+        </label>
         <button class="save" type="submit">保存设置</button>
       </form>
 
@@ -96,47 +108,53 @@
     </section>
 
     <section class="panel codex-guard">
-      <div class="panel-head">
+      <div class="panel-head codex-head">
         <div>
           <h2>Codex 守护</h2>
           <p class="panel-note">识别 Codex Desktop 遗留的 MCP/node/cmd 工具链，保护当前对话，清理旧的重复残留。</p>
         </div>
-        <div class="link-actions">
-          <button id="codexScanButton" type="button">扫描</button>
-          <button id="codexDryRunButton" type="button">预演</button>
-          <button id="codexCleanButton" type="button">清理残留</button>
+        <div class="link-actions codex-actions">
+          <button id="codexScanButton" class="button-secondary" type="button">扫描</button>
+          <button id="codexDryRunButton" class="button-secondary" type="button">预演</button>
+          <button id="codexCleanButton" class="button-danger" type="button">清理残留</button>
         </div>
       </div>
       <div class="codex-summary">
-        <div>
+        <div class="summary-card summary-status">
           <span class="label">Codex 状态</span>
           <strong id="codexRunning">--</strong>
         </div>
-        <div>
+        <div class="summary-card summary-memory">
           <span class="label">MCP 候选</span>
           <strong id="codexCandidates">--</strong>
+          <small id="codexCandidateMemory">--</small>
         </div>
-        <div>
+        <div class="summary-card summary-cleanable">
           <span class="label">可清理</span>
           <strong id="codexCleanable">--</strong>
         </div>
-        <div>
+        <div class="summary-card summary-commit">
           <span class="label">提交内存</span>
           <strong id="codexCommit">--</strong>
         </div>
       </div>
       <div id="codexStatus" class="codex-status">尚未扫描。</div>
+      <div class="codex-section-head">
+        <h3>工具分组</h3>
+        <span id="codexGroupMeta">--</span>
+      </div>
+      <div id="codexGroupList" class="codex-group-list"></div>
       <div class="codex-lists">
-        <section>
-          <h3>可清理</h3>
+        <section class="process-column process-column-cleanable">
+          <h3>可清理 <span id="codexCleanableCount">--</span></h3>
           <div id="codexCleanableList" class="process-list"></div>
         </section>
-        <section>
-          <h3>保护中</h3>
+        <section class="process-column">
+          <h3>保护中 <span id="codexProtectedCount">--</span></h3>
           <div id="codexProtectedList" class="process-list"></div>
         </section>
-        <section>
-          <h3>需人工确认</h3>
+        <section class="process-column">
+          <h3>需人工确认 <span id="codexSuspiciousCount">--</span></h3>
           <div id="codexSuspiciousList" class="process-list"></div>
         </section>
       </div>

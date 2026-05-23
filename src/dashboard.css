@@ -107,6 +107,7 @@ h1 {
 .actions,
 .link-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -132,10 +133,34 @@ button:active {
   transform: translateY(0);
 }
 
+button:disabled {
+  cursor: default;
+  opacity: 0.58;
+  transform: none;
+  box-shadow: none;
+}
+
 #cleanButton,
 .save {
   border-color: rgba(217, 249, 157, 0.72);
   background: rgba(22, 101, 52, 0.58);
+}
+
+.button-secondary {
+  border-color: rgba(125, 211, 252, 0.32);
+  color: #d8f7ff;
+  background: rgba(15, 23, 42, 0.34);
+}
+
+.button-danger {
+  border-color: rgba(251, 146, 60, 0.78);
+  color: #fff7ed;
+  background: rgba(154, 52, 18, 0.58);
+}
+
+.button-danger:hover {
+  border-color: rgba(254, 215, 170, 0.92);
+  background: rgba(194, 65, 12, 0.68);
 }
 
 .metrics {
@@ -306,6 +331,27 @@ input:focus {
   margin-top: 14px;
 }
 
+.codex-head {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  padding-bottom: 2px;
+}
+
+.codex-head > div:first-child {
+  min-width: min(100%, 360px);
+  flex: 1 1 360px;
+}
+
+.codex-actions {
+  justify-content: flex-end;
+  flex: 0 1 320px;
+}
+
+.codex-actions .button-danger {
+  min-width: 104px;
+  margin-left: 6px;
+}
+
 .panel-note {
   margin-top: 3px;
   color: #9ccbd3;
@@ -319,11 +365,29 @@ input:focus {
   margin-bottom: 10px;
 }
 
-.codex-summary > div {
+.summary-card {
+  position: relative;
+  overflow: hidden;
   min-height: 70px;
   padding: 12px;
   border-radius: 8px;
   background: rgba(2, 6, 23, 0.32);
+}
+
+.summary-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: rgba(125, 211, 252, 0.58);
+}
+
+.summary-cleanable::before {
+  background: rgba(251, 146, 60, 0.8);
+}
+
+.summary-memory::before {
+  background: rgba(167, 243, 208, 0.72);
 }
 
 .codex-summary strong {
@@ -334,26 +398,137 @@ input:focus {
   line-height: 26px;
 }
 
+.codex-summary small {
+  display: block;
+  margin-top: 4px;
+  color: #9ccbd3;
+  font-size: 11px;
+  line-height: 15px;
+}
+
 .codex-status {
-  min-height: 30px;
+  min-height: 36px;
+  max-height: 58px;
   margin-bottom: 12px;
-  padding: 8px 10px;
+  overflow: auto;
+  padding: 9px 11px;
+  border: 1px solid rgba(125, 211, 252, 0.2);
   border-radius: 7px;
   color: #dbeafe;
   background: rgba(14, 116, 144, 0.18);
   font-size: 12px;
+  line-height: 17px;
+}
+
+.codex-status.is-actionable,
+.codex-status.is-pressure {
+  border-color: rgba(251, 146, 60, 0.38);
+  background: rgba(124, 45, 18, 0.28);
+}
+
+.codex-status.is-clear {
+  border-color: rgba(74, 222, 128, 0.22);
+  background: rgba(20, 83, 45, 0.22);
+}
+
+.codex-status.is-busy {
+  border-color: rgba(125, 211, 252, 0.38);
+  background: rgba(14, 116, 144, 0.24);
+}
+
+.codex-status.is-error {
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(127, 29, 29, 0.34);
 }
 
 .codex-lists {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.18fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
 }
 
+.process-column {
+  min-width: 0;
+}
+
+.codex-group-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.codex-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 8px;
+}
+
+.codex-section-head h3 {
+  margin: 0;
+  color: #e0faff;
+  font-size: 13px;
+}
+
+.codex-section-head span {
+  color: #9ccbd3;
+  font-size: 11px;
+}
+
+.group-item {
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: 7px;
+  background: rgba(2, 6, 23, 0.34);
+}
+
+.group-item strong,
+.group-item span,
+.group-item code {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-item strong {
+  color: #f8fafc;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.group-item span,
+.group-item code {
+  margin-top: 3px;
+  color: #9ccbd3;
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.group-item code {
+  color: #fef08a;
+}
+
 .codex-lists h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin: 0 0 8px;
   color: #e0faff;
   font-size: 13px;
+}
+
+.codex-lists h3 span {
+  min-width: 24px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: #dffbff;
+  background: rgba(14, 116, 144, 0.28);
+  font-size: 11px;
+  text-align: center;
 }
 
 .process-list {
@@ -372,6 +547,7 @@ input:focus {
 
 .process-item strong {
   display: block;
+  overflow-wrap: anywhere;
   color: #f8fafc;
   font-size: 12px;
   line-height: 16px;
@@ -381,6 +557,7 @@ input:focus {
 .process-item code {
   display: block;
   margin-top: 3px;
+  overflow-wrap: anywhere;
   color: #9ccbd3;
   font-size: 11px;
   line-height: 15px;
@@ -393,9 +570,96 @@ input:focus {
   color: #c4b5fd;
 }
 
-@media (max-width: 760px) {
+.process-column-cleanable .process-item code {
+  white-space: normal;
+}
+
+@media (max-width: 760px) and (min-width: 681px) {
+  .shell {
+    padding: 16px;
+  }
+
+  .topbar {
+    margin-bottom: 14px;
+  }
+
+  .metrics {
+    grid-template-columns: 1.25fr 1fr 1fr;
+    gap: 10px;
+  }
+
+  .metric {
+    min-height: 84px;
+    padding: 12px;
+  }
+
+  .metric.main strong {
+    font-size: 32px;
+    line-height: 36px;
+  }
+
+  .grid {
+    grid-template-columns: 248px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .panel {
+    padding: 12px;
+  }
+
+  label {
+    margin-bottom: 8px;
+  }
+
+  .history-list {
+    max-height: 386px;
+  }
+
+  .codex-actions {
+    flex: 0 1 auto;
+  }
+
+  .codex-summary {
+    gap: 8px;
+  }
+
+  .summary-card {
+    min-height: 64px;
+    padding: 10px;
+  }
+
+  .codex-lists,
+  .codex-group-list {
+    gap: 8px;
+  }
+
+  .process-list {
+    max-height: 210px;
+  }
+}
+
+@media (max-width: 680px) {
+  .topbar,
+  .panel-head,
+  .codex-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .actions,
+  .link-actions,
+  .codex-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .codex-actions button {
+    flex: 1 1 110px;
+  }
+
   .metrics,
   .grid,
+  .codex-group-list,
   .codex-summary,
   .codex-lists {
     grid-template-columns: 1fr;

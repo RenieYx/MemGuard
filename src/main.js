@@ -19,7 +19,9 @@ let highCount = 0;
 let lastAutoTrim = 0;
 let pausedUntil = 0;
 let lastCodexScan = 0;
+let lastCodexAutoClean = 0;
 let lastCodexScanResult = null;
+let codexAutoCleanInFlight = false;
 
 const zh = {
   cleanNow: '\u7acb\u5373\u6e05\u7406',
@@ -44,12 +46,16 @@ const defaultConfig = {
   trimOnStart: true,
   historyLimit: 50,
   codexGuardEnabled: true,
+  codexPolicyVersion: 2,
   codexAutoCleanAfterCodexExit: true,
-  codexCleanWhileRunning: 'orphan-only',
+  codexAutoCleanWhileRunning: true,
+  codexCleanWhileRunning: 'current-safe',
   codexStaleMinutes: 10,
   codexMaxMcpProcesses: 40,
   codexCommitPressurePercent: 85,
   codexScanIntervalSeconds: 60,
+  codexAutoCleanWhileRunningCooldownMinutes: 5,
+  codexAutoCleanWhileRunningMaxKillsPerPass: 24,
   codexDryRunByDefault: true,
   codexKillAllowlist: [
     '@shell-mcp/mcp-lite',
@@ -57,10 +63,18 @@ const defaultConfig = {
     '@modelcontextprotocol/server-filesystem',
     '@modelcontextprotocol/server-sequential-thinking',
     '@modelcontextprotocol/server-memory',
+    '@modelcontextprotocol/server-everything',
     '@modelcontextprotocol/server-fetch',
+    '@modelcontextprotocol/server-git',
+    '@modelcontextprotocol/server-puppeteer',
     'node_repl.exe'
   ]
 };
+
+const codexAutoCleanWhileRunningReasons = [
+  'previous-codex-session-orphan-while-running',
+  'duplicate-desktop-app-server-tool'
+];
 
 ensureDataFiles();
 let config = loadConfig();
@@ -80,8 +94,11 @@ function ensureDataFiles() {
   fs.mkdirSync(LOG_DIR, { recursive: true });
 }
 
-function runEngine(mode, reason = 'manual') {
+function runEngine(mode, reason = 'manual', options = {}) {
   return new Promise((resolve, reject) => {
+    const codexDryRun = options.codexDryRun == null
+      ? config.codexDryRunByDefault
+      : Boolean(options.codexDryRun);
     const args = [
       '-NoLogo',
       '-NoProfile',
@@ -97,7 +114,9 @@ function runEngine(mode, reason = 'manual') {
       '-CodexMaxMcpProcesses', String(config.codexMaxMcpProcesses),
       '-CodexCommitPressurePercent', String(config.codexCommitPressurePercent),
       '-CodexCleanWhileRunning', String(config.codexCleanWhileRunning),
-      '-CodexDryRun', mode === 'codex-clean' ? String(config.codexDryRunByDefault) : 'true',
+      '-CodexMaxKillsPerPass', mode === 'codex-clean' ? String(options.codexMaxKillsPerPass || 0) : '0',
+      '-CodexAllowedReasonsJson', mode === 'codex-clean' ? JSON.stringify(options.codexAllowedReasons || []) : '[]',
+      '-CodexDryRun', mode === 'codex-clean' ? String(codexDryRun) : 'true',
       '-CodexKillAllowlistJson', JSON.stringify(config.codexKillAllowlist || [])
     ];
 
@@ -122,10 +141,26 @@ function loadConfig() {
       fs.writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2), 'utf8');
       return { ...defaultConfig };
     }
-    return { ...defaultConfig, ...JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) };
+    const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    const migrated = migrateConfig(parsed);
+    if (Number(parsed.codexPolicyVersion || 0) < defaultConfig.codexPolicyVersion) {
+      fs.writeFileSync(CONFIG_FILE, JSON.stringify(migrated, null, 2), 'utf8');
+    }
+    return migrated;
   } catch {
     return { ...defaultConfig };
   }
+}
+
+function migrateConfig(loadedConfig) {
+  const merged = { ...defaultConfig, ...(loadedConfig || {}) };
+  if (Number(loadedConfig && loadedConfig.codexPolicyVersion || 0) < defaultConfig.codexPolicyVersion) {
+    merged.codexPolicyVersion = defaultConfig.codexPolicyVersion;
+    merged.codexAutoCleanWhileRunning = true;
+    merged.codexCleanWhileRunning = 'current-safe';
+    merged.codexKillAllowlist = mergeAllowlists(loadedConfig ? loadedConfig.codexKillAllowlist : []);
+  }
+  return merged;
 }
 
 function saveConfig(nextConfig) {
@@ -140,12 +175,16 @@ function saveConfig(nextConfig) {
     historyLimit: clampNumber(nextConfig.historyLimit, 10, 500, defaultConfig.historyLimit),
     trimOnStart: Boolean(nextConfig.trimOnStart),
     codexGuardEnabled: Boolean(nextConfig.codexGuardEnabled),
+    codexPolicyVersion: defaultConfig.codexPolicyVersion,
     codexAutoCleanAfterCodexExit: Boolean(nextConfig.codexAutoCleanAfterCodexExit),
-    codexCleanWhileRunning: normalizeChoice(nextConfig.codexCleanWhileRunning, ['orphan-only', 'report-only', 'allow-stale'], defaultConfig.codexCleanWhileRunning),
+    codexAutoCleanWhileRunning: Boolean(nextConfig.codexAutoCleanWhileRunning),
+    codexCleanWhileRunning: normalizeChoice(nextConfig.codexCleanWhileRunning, ['current-safe', 'orphan-only', 'report-only', 'allow-stale'], defaultConfig.codexCleanWhileRunning),
     codexStaleMinutes: clampNumber(nextConfig.codexStaleMinutes, 1, 240, defaultConfig.codexStaleMinutes),
     codexMaxMcpProcesses: clampNumber(nextConfig.codexMaxMcpProcesses, 5, 1000, defaultConfig.codexMaxMcpProcesses),
     codexCommitPressurePercent: clampNumber(nextConfig.codexCommitPressurePercent, 50, 99, defaultConfig.codexCommitPressurePercent),
     codexScanIntervalSeconds: clampNumber(nextConfig.codexScanIntervalSeconds, 15, 600, defaultConfig.codexScanIntervalSeconds),
+    codexAutoCleanWhileRunningCooldownMinutes: clampNumber(nextConfig.codexAutoCleanWhileRunningCooldownMinutes, 1, 240, defaultConfig.codexAutoCleanWhileRunningCooldownMinutes),
+    codexAutoCleanWhileRunningMaxKillsPerPass: clampNumber(nextConfig.codexAutoCleanWhileRunningMaxKillsPerPass, 1, 100, defaultConfig.codexAutoCleanWhileRunningMaxKillsPerPass),
     codexDryRunByDefault: Boolean(nextConfig.codexDryRunByDefault),
     codexKillAllowlist: normalizeAllowlist(nextConfig.codexKillAllowlist)
   };
@@ -170,6 +209,11 @@ function normalizeAllowlist(value) {
     .map((item) => String(item || '').trim())
     .filter(Boolean);
   return items.length ? [...new Set(items)] : [...defaultConfig.codexKillAllowlist];
+}
+
+function mergeAllowlists(value) {
+  const loaded = Array.isArray(value) ? value : [];
+  return normalizeAllowlist([...defaultConfig.codexKillAllowlist, ...loaded]);
 }
 
 function readHistory() {
@@ -249,14 +293,75 @@ async function codexScan(force = true) {
 }
 
 async function codexClean(reason = 'codex-manual', dryRun = config.codexDryRunByDefault) {
-  const previousDryRun = config.codexDryRunByDefault;
-  config.codexDryRunByDefault = Boolean(dryRun);
+  const result = await runEngine('codex-clean', reason, { codexDryRun: dryRun });
+  recordCodexHistory(result, reason);
+  return result;
+}
+
+function shouldAutoCleanCodex(scan, now = Date.now()) {
+  if (!config.codexGuardEnabled || !scan || !scan.codex || !scan.summary) {
+    return false;
+  }
+  if (codexAutoCleanInFlight) {
+    return false;
+  }
+
+  const cleanableCount = Number(scan.summary.cleanableCount || 0);
+  if (cleanableCount <= 0) {
+    return false;
+  }
+
+  const codexRunning = Boolean(scan.codex.running);
+  if (codexRunning && !config.codexAutoCleanWhileRunning) {
+    return false;
+  }
+  if (!codexRunning && !config.codexAutoCleanAfterCodexExit) {
+    return false;
+  }
+
+  const cleanableItems = Array.isArray(scan.cleanable) ? scan.cleanable : [];
+  const hasPressure = Boolean(scan.summary.overProcessLimit || scan.summary.overCommitPressure);
+  const hasCurrentSafeReason = cleanableItems.some((item) =>
+    item && codexAutoCleanWhileRunningReasons.includes(item.reason)
+  );
+  if (codexRunning && !hasCurrentSafeReason) {
+    return false;
+  }
+  const hasAfterExitReason = !codexRunning && cleanableItems.some((item) => item && item.reason === 'codex-not-running-and-allowlisted-orphan');
+  if (!codexRunning && !hasPressure && !hasAfterExitReason) {
+    return false;
+  }
+
+  const cooldownMinutes = codexRunning
+    ? config.codexAutoCleanWhileRunningCooldownMinutes
+    : config.codexScanIntervalSeconds / 60;
+  const cooldownMs = Math.max(60_000, Number(cooldownMinutes || 1) * 60 * 1000);
+  return now - lastCodexAutoClean >= cooldownMs;
+}
+
+async function autoCleanCodex(scan, now = Date.now()) {
+  if (!shouldAutoCleanCodex(scan, now)) {
+    return null;
+  }
+
+  const codexRunning = Boolean(scan.codex && scan.codex.running);
+  const reason = codexRunning ? 'codex-auto-while-running' : 'codex-auto-after-exit';
+  const allowedReasons = codexRunning ? codexAutoCleanWhileRunningReasons : [];
+  const maxKills = codexRunning ? config.codexAutoCleanWhileRunningMaxKillsPerPass : 0;
+  lastCodexAutoClean = now;
+  codexAutoCleanInFlight = true;
   try {
-    const result = await runEngine('codex-clean', reason);
+    const result = await runEngine('codex-clean', reason, {
+      codexDryRun: false,
+      codexAllowedReasons: allowedReasons,
+      codexMaxKillsPerPass: maxKills
+    });
     recordCodexHistory(result, reason);
+    lastCodexScan = 0;
+    lastCodexScanResult = null;
     return result;
   } finally {
-    config.codexDryRunByDefault = previousDryRun;
+    codexAutoCleanInFlight = false;
   }
 }
 
@@ -431,23 +536,7 @@ async function publishSnapshot() {
     if (config.codexGuardEnabled) {
       try {
         const codex = await codexScan(false);
-        const shouldAutoClean = config.codexAutoCleanAfterCodexExit &&
-          codex &&
-          codex.codex &&
-          !codex.codex.running &&
-          codex.summary &&
-          codex.summary.cleanableCount > 0 &&
-          (codex.summary.overProcessLimit || codex.summary.overCommitPressure);
-        if (shouldAutoClean) {
-          const previousDryRun = config.codexDryRunByDefault;
-          config.codexDryRunByDefault = false;
-          try {
-            const result = await runEngine('codex-clean', 'codex-auto-after-exit');
-            recordCodexHistory(result, 'codex-auto-after-exit');
-          } finally {
-            config.codexDryRunByDefault = previousDryRun;
-          }
-        }
+        await autoCleanCodex(codex, now);
       } catch {}
     }
   } catch (error) {
