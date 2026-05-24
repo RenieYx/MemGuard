@@ -12,9 +12,12 @@ const state = {
   lastFrame: performance.now(),
   cleaning: false,
   pausedUntil: 0,
+  lastTrim: '',
   statusOverride: '',
   statusOverrideUntil: 0
 };
+
+let animationFrame = 0;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -38,6 +41,8 @@ function paint() {
     last.textContent = state.statusOverride;
   } else if (state.pausedUntil && Date.now() < state.pausedUntil) {
     last.textContent = '已暂停';
+  } else {
+    last.textContent = lastText(state.lastTrim);
   }
 }
 
@@ -53,19 +58,31 @@ function animate(now) {
   }
 
   paint();
-  requestAnimationFrame(animate);
+  if (Math.abs(state.targetUsed - state.used) >= 0.02) {
+    animationFrame = requestAnimationFrame(animate);
+  } else {
+    animationFrame = 0;
+  }
+}
+
+function startAnimation() {
+  if (animationFrame) return;
+  state.lastFrame = performance.now();
+  animationFrame = requestAnimationFrame(animate);
 }
 
 function render(snapshot) {
   const used = Number(snapshot.usedPercent || 0);
   state.targetUsed = clamp(used, 0, 100);
   state.freeGB = Number(snapshot.freeGB || 0);
+  state.lastTrim = snapshot.lastTrim || state.lastTrim || '';
   state.pausedUntil = Number(snapshot.pausedUntil || state.pausedUntil || 0);
   if (!state.statusOverride || Date.now() >= state.statusOverrideUntil) {
     last.textContent = state.pausedUntil && Date.now() < state.pausedUntil ? '已暂停' : lastText(snapshot.lastTrim);
   }
   card.classList.toggle('high', used >= 85);
   card.classList.toggle('paused', state.pausedUntil && Date.now() < state.pausedUntil);
+  startAnimation();
 }
 
 function setCleaning(cleaning) {
@@ -81,6 +98,7 @@ function showTrimFeedback(result) {
   const trimmed = Number(result.trimmedProcesses || 0);
   state.statusOverride = freed >= 0.01 ? `+${freed.toFixed(2)} GB` : `${trimmed} 个应用`;
   state.statusOverrideUntil = Date.now() + 5000;
+  setTimeout(paint, 5100);
   card.classList.remove('feedback');
   void card.offsetWidth;
   card.classList.add('feedback');
@@ -109,6 +127,7 @@ window.memguard.onTrimResult((result) => {
 window.memguard.onError((message) => {
   state.statusOverride = message || '引擎错误';
   state.statusOverrideUntil = Date.now() + 5000;
+  setTimeout(paint, 5100);
   last.textContent = state.statusOverride;
 });
 
@@ -118,6 +137,7 @@ window.memguard.onPauseState((pausedUntil) => {
   state.pausedUntil = Number(pausedUntil || 0);
   state.statusOverride = state.pausedUntil && Date.now() < state.pausedUntil ? '已暂停' : '已恢复';
   state.statusOverrideUntil = Date.now() + 3000;
+  setTimeout(paint, 3100);
   card.classList.toggle('paused', state.pausedUntil && Date.now() < state.pausedUntil);
 });
 
@@ -127,4 +147,5 @@ card.addEventListener('contextmenu', (event) => {
   event.preventDefault();
   window.memguard.showMenu();
 });
-requestAnimationFrame(animate);
+setInterval(paint, 15000);
+paint();

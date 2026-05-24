@@ -25,6 +25,9 @@ let codexAutoCleanInFlight = false;
 let publishSnapshotInFlight = false;
 let snapshotTimer = null;
 let dashboardRevealTimer = null;
+let engineQueue = Promise.resolve();
+let lastSnapshotResult = null;
+let lastSnapshotAt = 0;
 
 const zh = {
   cleanNow: '\u7acb\u5373\u6e05\u7406',
@@ -39,6 +42,12 @@ const zh = {
   exit: '\u9000\u51fa',
   settingsTitle: 'MemGuard \u8bbe\u7f6e'
 };
+
+const packaged = app.isPackaged;
+app.commandLine.appendSwitch('disable-background-networking');
+app.commandLine.appendSwitch('disable-component-update');
+app.commandLine.appendSwitch('disable-domain-reliability');
+app.commandLine.appendSwitch('disable-sync');
 
 const defaultConfig = {
   triggerPercent: 85,
@@ -102,7 +111,7 @@ function ensureDataFiles() {
 }
 
 function runEngine(mode, reason = 'manual', options = {}) {
-  return new Promise((resolve, reject) => {
+  const task = () => new Promise((resolve, reject) => {
     const codexDryRun = options.codexDryRun == null
       ? config.codexDryRunByDefault
       : Boolean(options.codexDryRun);
@@ -141,6 +150,9 @@ function runEngine(mode, reason = 'manual', options = {}) {
       }
     });
   });
+  const run = engineQueue.then(task, task);
+  engineQueue = run.catch(() => {});
+  return run;
 }
 
 function writeAppLog(message) {
@@ -163,6 +175,18 @@ function writeAppLog(message) {
     ].join(':');
     fs.appendFileSync(path.join(LOG_DIR, `memguard-${day}.log`), `[${time}] ${message}\n`, 'utf8');
   } catch {}
+}
+
+async function getSnapshot(options = {}) {
+  const maxAgeMs = Number(options.maxAgeMs || 0);
+  const now = Date.now();
+  if (maxAgeMs > 0 && lastSnapshotResult && now - lastSnapshotAt <= maxAgeMs) {
+    return { ...lastSnapshotResult };
+  }
+  const snapshot = await runEngine('snapshot', options.reason || 'snapshot');
+  lastSnapshotResult = snapshot;
+  lastSnapshotAt = Date.now();
+  return { ...snapshot };
 }
 
 function loadConfig() {
@@ -299,6 +323,8 @@ async function cleanNow(reason = 'manual') {
   win.webContents.send('cleaning-state', true);
   try {
     const result = await runEngine('trim', reason);
+    lastSnapshotResult = result && result.after ? result.after : null;
+    lastSnapshotAt = lastSnapshotResult ? Date.now() : 0;
     recordTrimHistory(result, reason);
     win.webContents.send('trim-result', result);
     updateTrayMenu();
@@ -318,6 +344,10 @@ async function codexScan(force = true) {
     return lastCodexScanResult;
   }
   const result = await runEngine('codex-scan', 'scan');
+  if (result && result.snapshot) {
+    lastSnapshotResult = result.snapshot;
+    lastSnapshotAt = Date.now();
+  }
   lastCodexScan = now;
   lastCodexScanResult = result;
   return result;
@@ -325,6 +355,12 @@ async function codexScan(force = true) {
 
 async function codexClean(reason = 'codex-manual', dryRun = config.codexDryRunByDefault) {
   const result = await runEngine('codex-clean', reason, { codexDryRun: dryRun });
+  if (result && result.after && result.after.snapshot) {
+    lastSnapshotResult = result.after.snapshot;
+    lastSnapshotAt = Date.now();
+  }
+  lastCodexScan = 0;
+  lastCodexScanResult = null;
   recordCodexHistory(result, reason);
   return result;
 }
@@ -389,6 +425,10 @@ async function autoCleanCodex(scan, now = Date.now()) {
       codexAllowedReasons: allowedReasons,
       codexMaxKillsPerPass: maxKills
     });
+    if (result && result.after && result.after.snapshot) {
+      lastSnapshotResult = result.after.snapshot;
+      lastSnapshotAt = Date.now();
+    }
     recordCodexHistory(result, reason);
     lastCodexScan = 0;
     lastCodexScanResult = null;
@@ -445,6 +485,9 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
+      backgroundThrottling: true,
+      devTools: !packaged,
+      spellcheck: false,
       nodeIntegration: false
     }
   });
@@ -476,6 +519,9 @@ function createDashboard() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
+      backgroundThrottling: true,
+      devTools: !packaged,
+      spellcheck: false,
       nodeIntegration: false
     }
   });
@@ -558,7 +604,7 @@ async function publishSnapshot() {
   }
   publishSnapshotInFlight = true;
   try {
-    const snapshot = await runEngine('snapshot');
+    const snapshot = await getSnapshot({ reason: 'snapshot' });
     snapshot.pausedUntil = pausedUntil || null;
     win.webContents.send('snapshot', snapshot);
 
@@ -587,6 +633,8 @@ async function publishSnapshot() {
       lastAutoTrim = now;
       highCount = 0;
       const result = await runEngine('trim', 'auto');
+      lastSnapshotResult = result && result.after ? result.after : null;
+      lastSnapshotAt = lastSnapshotResult ? Date.now() : 0;
       recordTrimHistory(result, 'auto');
       win.webContents.send('trim-result', result);
       if (Number(result.freedGB || 0) < 0.1 && snapshot.usedPercent < 90 && snapshot.commitPercent < config.codexCommitPressurePercent) {
@@ -611,7 +659,7 @@ function restartSnapshotTimer() {
 }
 
 ipcMain.handle('trim-now', async () => cleanNow('manual'));
-ipcMain.handle('codex-scan', async () => codexScan(true));
+ipcMain.handle('codex-scan', async (_event, force = true) => codexScan(Boolean(force)));
 ipcMain.handle('codex-clean-dry-run', async () => codexClean('codex-dry-run', true));
 ipcMain.handle('codex-clean', async () => codexClean('codex-manual', false));
 ipcMain.handle('hide-window', () => {
@@ -619,7 +667,7 @@ ipcMain.handle('hide-window', () => {
 });
 ipcMain.handle('show-menu', () => showContextMenu());
 ipcMain.handle('dashboard-state', async () => ({
-  snapshot: await runEngine('snapshot'),
+  snapshot: await getSnapshot({ reason: 'dashboard-state', maxAgeMs: 4000 }),
   config,
   history: readHistory(),
   pausedUntil

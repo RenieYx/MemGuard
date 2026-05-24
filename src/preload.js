@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld('memguard', {
   onCleaningState: (callback) => ipcRenderer.on('cleaning-state', (_event, cleaning) => callback(cleaning)),
   onPauseState: (callback) => ipcRenderer.on('pause-state', (_event, pausedUntil) => callback(pausedUntil)),
   trimNow: () => ipcRenderer.invoke('trim-now'),
-  codexScan: () => ipcRenderer.invoke('codex-scan'),
+  codexScan: (force = true) => ipcRenderer.invoke('codex-scan', force),
   codexCleanDryRun: () => ipcRenderer.invoke('codex-clean-dry-run'),
   codexClean: () => ipcRenderer.invoke('codex-clean'),
   showMenu: () => ipcRenderer.invoke('show-menu'),

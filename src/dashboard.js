@@ -252,14 +252,14 @@ function renderCodexScan(scan, statusText) {
   renderProcessList(codexSuspiciousList, scan.suspicious, '没有需要人工确认的进程。');
 }
 
-async function runCodexAction(action) {
+async function runCodexAction(action, options = {}) {
   for (const button of [codexScanButton, codexDryRunButton, codexCleanButton]) button.disabled = true;
   try {
     const actionText = { scan: '正在扫描', 'dry-run': '正在预演', clean: '正在清理' }[action] || '处理中';
     codexStatus.className = 'codex-status is-busy';
     codexStatus.textContent = `${actionText}...`;
     if (action === 'scan') {
-      renderCodexScan(await window.memguard.codexScan(), '扫描完成。');
+      renderCodexScan(await window.memguard.codexScan(options.force !== false), '扫描完成。');
     } else if (action === 'dry-run') {
       const result = await window.memguard.codexCleanDryRun();
       renderCodexScan(result.before, `预演完成。将清理 ${result.targetCount || 0} 个目标。`);
@@ -309,11 +309,12 @@ cleanButton.addEventListener('click', async () => {
 document.getElementById('openLogsButton').addEventListener('click', () => window.memguard.openLogs());
 document.getElementById('openHistoryButton').addEventListener('click', () => window.memguard.openHistory());
 document.getElementById('openConfigButton').addEventListener('click', () => window.memguard.openConfig());
-codexScanButton.addEventListener('click', () => runCodexAction('scan'));
+codexScanButton.addEventListener('click', () => runCodexAction('scan', { force: true }));
 codexDryRunButton.addEventListener('click', () => runCodexAction('dry-run'));
 codexCleanButton.addEventListener('click', () => runCodexAction('clean'));
 minimizeWindow.addEventListener('click', () => window.memguard.dashboardWindow('minimize'));
 closeWindow.addEventListener('click', () => window.memguard.dashboardWindow('close'));
 
-refresh();
-runCodexAction('scan');
+refresh().then(() => {
+  setTimeout(() => runCodexAction('scan', { force: false }), 900);
+});

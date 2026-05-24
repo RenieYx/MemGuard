@@ -1,4 +1,4 @@
-# MemGuard V1.2.1
+# MemGuard V1.2.2
 
 MemGuard 是一个轻量 Windows 内存守护工具。它提供桌面内存小组件、手动/自动工作集修剪，以及专门针对 Codex Desktop 残留 MCP 工具链的 Codex Guard。
 
@@ -11,6 +11,7 @@ MemGuard 是一个轻量 Windows 内存守护工具。它提供桌面内存小�
 - Codex Guard 可扫描、预演并清理 Codex 遗留的 MCP/node/cmd 工具链。
 - V1.2 会按 Codex 工具分组显示候选进程和内存口径，并让普通清理避开活跃的 Codex/Electron/Chromium/Node 工具树。
 - V1.2.1 在内存或 commit 高压时会立即清理年轻但重复的 Codex desktop app-server 工具链，并对 Chrome/Codex/Electron 做工作集修剪。
+- V1.2.2 保留桌面小窗常驻，同时减少空转动画和 PowerShell 并发峰值；发布页只提供推荐安装包，避免用户分不清下载项。
 - V1.2 安装器支持覆盖升级，会在安装前停止旧版 MemGuard 相关进程，避免安装目录占用冲突。
 
 ## Codex Guard
@@ -52,10 +53,11 @@ npm install
 npm run dist
 ```
 
-打包产物在 `dist` 目录：
+打包产物在 `dist` 目录。普通用户请下载并运行推荐安装包：
 
-- `MemGuard-Setup-V1.2.1.exe`：安装版
-- `MemGuard-V1.2.1-x64.exe`：便携版
+- `MemGuard-Setup-V1.2.2.exe`：推荐的 Windows 安装包，也用于覆盖升级。
+
+V1.2.2 默认不再构建便携版，避免发布页出现两个体积接近、用途不清的 exe。
 
 源码目录安装：
 
@@ -74,7 +76,7 @@ Install-or-Repair.bat
 直接运行新版安装包：
 
 ```text
-MemGuard-Setup-V1.2.1.exe
+MemGuard-Setup-V1.2.2.exe
 ```
 
 V1.2 安装器使用固定应用 GUID，并在安装前停止旧版 MemGuard 计划任务和 MemGuard 自身进程，避免版本迭代时出现安装冲突。
