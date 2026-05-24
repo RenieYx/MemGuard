@@ -22,6 +22,9 @@ let lastCodexScan = 0;
 let lastCodexAutoClean = 0;
 let lastCodexScanResult = null;
 let codexAutoCleanInFlight = false;
+let publishSnapshotInFlight = false;
+let snapshotTimer = null;
+let dashboardRevealTimer = null;
 
 const zh = {
   cleanNow: '\u7acb\u5373\u6e05\u7406',
@@ -76,6 +79,9 @@ const codexAutoCleanWhileRunningReasons = [
   'previous-codex-session-missing-parent-chain-while-running',
   'duplicate-desktop-app-server-tool'
 ];
+const codexAutoCleanAfterExitReasons = [
+  'codex-not-running-and-allowlisted-orphan'
+];
 
 ensureDataFiles();
 let config = loadConfig();
@@ -121,7 +127,8 @@ function runEngine(mode, reason = 'manual', options = {}) {
       '-CodexKillAllowlistJson', JSON.stringify(config.codexKillAllowlist || [])
     ];
 
-    execFile(POWERSHELL, args, { windowsHide: true, cwd: ROOT, timeout: 30000 }, (error, stdout, stderr) => {
+    const timeout = options.timeoutMs || (mode === 'codex-clean' ? 90_000 : mode === 'codex-scan' ? 60_000 : 30_000);
+    execFile(POWERSHELL, args, { windowsHide: true, cwd: ROOT, timeout }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(stderr || error.message));
         return;
@@ -134,6 +141,28 @@ function runEngine(mode, reason = 'manual', options = {}) {
       }
     });
   });
+}
+
+function writeAppLog(message) {
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+    const stamp = new Date();
+    const day = [
+      stamp.getFullYear(),
+      String(stamp.getMonth() + 1).padStart(2, '0'),
+      String(stamp.getDate()).padStart(2, '0')
+    ].join('');
+    const time = [
+      String(stamp.getFullYear()).padStart(4, '0'),
+      String(stamp.getMonth() + 1).padStart(2, '0'),
+      String(stamp.getDate()).padStart(2, '0')
+    ].join('-') + ' ' + [
+      String(stamp.getHours()).padStart(2, '0'),
+      String(stamp.getMinutes()).padStart(2, '0'),
+      String(stamp.getSeconds()).padStart(2, '0')
+    ].join(':');
+    fs.appendFileSync(path.join(LOG_DIR, `memguard-${day}.log`), `[${time}] ${message}\n`, 'utf8');
+  } catch {}
 }
 
 function loadConfig() {
@@ -191,6 +220,7 @@ function saveConfig(nextConfig) {
   };
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(normalized, null, 2), 'utf8');
   config = normalized;
+  restartSnapshotTimer();
   return config;
 }
 
@@ -336,7 +366,9 @@ function shouldAutoCleanCodex(scan, now = Date.now()) {
   const cooldownMinutes = codexRunning
     ? config.codexAutoCleanWhileRunningCooldownMinutes
     : config.codexScanIntervalSeconds / 60;
-  const cooldownMs = Math.max(60_000, Number(cooldownMinutes || 1) * 60 * 1000);
+  const cooldownMs = hasPressure
+    ? Math.min(60_000, Math.max(15_000, Number(cooldownMinutes || 1) * 60 * 1000))
+    : Math.max(60_000, Number(cooldownMinutes || 1) * 60 * 1000);
   return now - lastCodexAutoClean >= cooldownMs;
 }
 
@@ -347,8 +379,8 @@ async function autoCleanCodex(scan, now = Date.now()) {
 
   const codexRunning = Boolean(scan.codex && scan.codex.running);
   const reason = codexRunning ? 'codex-auto-while-running' : 'codex-auto-after-exit';
-  const allowedReasons = codexRunning ? codexAutoCleanWhileRunningReasons : [];
-  const maxKills = codexRunning ? config.codexAutoCleanWhileRunningMaxKillsPerPass : 0;
+  const allowedReasons = codexRunning ? codexAutoCleanWhileRunningReasons : codexAutoCleanAfterExitReasons;
+  const maxKills = codexRunning ? config.codexAutoCleanWhileRunningMaxKillsPerPass : 100;
   lastCodexAutoClean = now;
   codexAutoCleanInFlight = true;
   try {
@@ -383,6 +415,19 @@ function showWidgetWindow() {
   win.setSkipTaskbar(true);
 }
 
+function revealDashboard() {
+  if (!dashboard || dashboard.isDestroyed()) return;
+  if (dashboardRevealTimer) {
+    clearTimeout(dashboardRevealTimer);
+    dashboardRevealTimer = null;
+  }
+  dashboard.setSkipTaskbar(true);
+  if (dashboard.isMinimized()) dashboard.restore();
+  dashboard.show();
+  dashboard.focus();
+  dashboard.setSkipTaskbar(true);
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 240,
@@ -413,9 +458,7 @@ function createWindow() {
 
 function createDashboard() {
   if (dashboard && !dashboard.isDestroyed()) {
-    dashboard.setSkipTaskbar(true);
-    dashboard.show();
-    dashboard.focus();
+    revealDashboard();
     return;
   }
 
@@ -437,13 +480,17 @@ function createDashboard() {
     }
   });
 
-  dashboard.loadFile(path.join(__dirname, 'dashboard.html'));
-  dashboard.once('ready-to-show', () => {
-    dashboard.setSkipTaskbar(true);
-    dashboard.show();
-    dashboard.setSkipTaskbar(true);
+  dashboard.once('ready-to-show', revealDashboard);
+  dashboard.webContents.once('did-finish-load', revealDashboard);
+  dashboard.loadFile(path.join(__dirname, 'dashboard.html')).then(revealDashboard).catch((error) => {
+    writeAppLog(`Dashboard load error: ${error.message}`);
   });
+  dashboardRevealTimer = setTimeout(revealDashboard, 1500);
   dashboard.on('closed', () => {
+    if (dashboardRevealTimer) {
+      clearTimeout(dashboardRevealTimer);
+      dashboardRevealTimer = null;
+    }
     dashboard = null;
   });
 }
@@ -505,6 +552,11 @@ function toggleWindow() {
 
 async function publishSnapshot() {
   if (!win || win.isDestroyed()) return;
+  if (publishSnapshotInFlight) {
+    writeAppLog('Snapshot skipped: previous publishSnapshot still running');
+    return;
+  }
+  publishSnapshotInFlight = true;
   try {
     const snapshot = await runEngine('snapshot');
     snapshot.pausedUntil = pausedUntil || null;
@@ -522,27 +574,40 @@ async function publishSnapshot() {
     }
 
     const now = Date.now();
+    if (config.codexGuardEnabled) {
+      try {
+        const codex = await codexScan(false);
+        await autoCleanCodex(codex, now);
+      } catch (error) {
+        writeAppLog(`Codex guard error: ${error.message}`);
+      }
+    }
+
     if (highCount >= config.consecutiveHighChecks && now - lastAutoTrim > config.cooldownMinutes * 60 * 1000) {
       lastAutoTrim = now;
       highCount = 0;
       const result = await runEngine('trim', 'auto');
       recordTrimHistory(result, 'auto');
       win.webContents.send('trim-result', result);
-      if (Number(result.freedGB || 0) < 0.1) {
+      if (Number(result.freedGB || 0) < 0.1 && snapshot.usedPercent < 90 && snapshot.commitPercent < config.codexCommitPressurePercent) {
         lastAutoTrim = now + config.cooldownMinutes * 60 * 1000;
       }
       updateTrayMenu();
     }
-
-    if (config.codexGuardEnabled) {
-      try {
-        const codex = await codexScan(false);
-        await autoCleanCodex(codex, now);
-      } catch {}
-    }
   } catch (error) {
+    writeAppLog(`Snapshot error: ${error.message}`);
     win.webContents.send('engine-error', error.message);
+  } finally {
+    publishSnapshotInFlight = false;
   }
+}
+
+function restartSnapshotTimer() {
+  if (snapshotTimer) {
+    clearInterval(snapshotTimer);
+    snapshotTimer = null;
+  }
+  snapshotTimer = setInterval(publishSnapshot, Math.max(5, Number(config.checkSeconds || defaultConfig.checkSeconds)) * 1000);
 }
 
 ipcMain.handle('trim-now', async () => cleanNow('manual'));
@@ -584,8 +649,10 @@ app.whenReady().then(async () => {
       recordTrimHistory(result, 'startup');
       if (win) win.webContents.once('did-finish-load', () => win.webContents.send('trim-result', result));
     }
-  } catch {}
-  setInterval(publishSnapshot, config.checkSeconds * 1000);
+  } catch (error) {
+    writeAppLog(`Startup trim error: ${error.message}`);
+  }
+  restartSnapshotTimer();
   setTimeout(publishSnapshot, 1200);
 });
 

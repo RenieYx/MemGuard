@@ -281,7 +281,8 @@ function Measure-ProcessMemoryMB {
 function Test-SafeTrimSkipProcess {
     param(
         [object]$Process,
-        [string]$CommandLine = ''
+        [string]$CommandLine = '',
+        [bool]$AllowSensitiveWorkingSetTrim = $false
     )
 
     if ($null -eq $Process) { return $true }
@@ -294,7 +295,7 @@ function Test-SafeTrimSkipProcess {
     }
 
     if ($name -in @('Codex', 'codex', 'chrome', 'msedge', 'electron', 'Code', 'Cursor')) {
-        return $true
+        return (-not $AllowSensitiveWorkingSetTrim)
     }
 
     $cmd = [string]$CommandLine
@@ -310,12 +311,12 @@ function Test-SafeTrimSkipProcess {
         $cmd.IndexOf('--type=crashpad-handler', [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
         $cmd.IndexOf('Electron', [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
         $cmd.IndexOf('Chromium', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-        return $true
+        return (-not $AllowSensitiveWorkingSetTrim)
     }
 
     if ($name -eq 'node') {
         if ([string]::IsNullOrWhiteSpace($cmd)) { return $true }
-        return (Test-CommandContainsAny $cmd @(
+        if (Test-CommandContainsAny $cmd @(
             'node_modules',
             'npm-cli.js',
             'npx-cli.js',
@@ -325,7 +326,9 @@ function Test-SafeTrimSkipProcess {
             'node_repl',
             'playwright',
             'cloudflared'
-        ))
+        )) {
+            return (-not $AllowSensitiveWorkingSetTrim)
+        }
     }
 
     return $false
@@ -548,13 +551,16 @@ function Get-CodexGuardScan {
             $record.category = 'protected'
             $record.reason = 'live-stdio-app-server'
         } elseif ($chainKind -eq 'desktop-app-server') {
-            if ($ageMinutes -lt $CodexStaleMinutes) {
-                $record.category = 'protected'
-                $record.reason = "desktop-app-server-younger-than-${CodexStaleMinutes}m"
-            } elseif ($isDuplicateOld -and $CodexCleanWhileRunning -eq 'report-only') {
+            if ($isDuplicateOld -and $CodexCleanWhileRunning -eq 'report-only') {
                 $record.category = 'suspicious'
                 $record.reason = 'duplicate-desktop-app-server-tool-report-only'
-            } elseif ($isDuplicateOld -and ($pressureHigh -or $candidates.Count -gt $CodexMaxMcpProcesses -or $CodexCleanWhileRunning -eq 'allow-stale' -or $CodexCleanWhileRunning -eq 'current-safe')) {
+            } elseif ($isDuplicateOld -and ($pressureHigh -or $candidates.Count -gt $CodexMaxMcpProcesses -or $CodexCleanWhileRunning -eq 'allow-stale')) {
+                $record.category = 'cleanable'
+                $record.reason = 'duplicate-desktop-app-server-tool'
+            } elseif ($ageMinutes -lt $CodexStaleMinutes) {
+                $record.category = 'protected'
+                $record.reason = "desktop-app-server-younger-than-${CodexStaleMinutes}m"
+            } elseif ($isDuplicateOld -and $CodexCleanWhileRunning -eq 'current-safe') {
                 $record.category = 'cleanable'
                 $record.reason = 'duplicate-desktop-app-server-tool'
             } elseif ($isDuplicateOld) {
@@ -824,6 +830,13 @@ function Invoke-CodexSelfTest {
         New-TestProcess 740 700 'cmd.exe' 'C:\Windows\system32\cmd.exe /d /s /c npx -y @modelcontextprotocol/server-filesystem E:\claude code' $currentSessionStart.AddMinutes(-15) 5 5
         New-TestProcess 741 740 'node.exe' 'node.exe npm-cli.js exec @modelcontextprotocol/server-filesystem E:\claude code' $currentSessionStart.AddMinutes(-15) 40 120
 
+        New-TestProcess 750 700 'cmd.exe' 'C:\Windows\system32\cmd.exe /d /s /c npx -y @modelcontextprotocol/server-filesystem E:\claude code' $now.AddMinutes(-4) 5 5
+        New-TestProcess 751 750 'node.exe' 'node.exe npm-cli.js exec @modelcontextprotocol/server-filesystem E:\claude code' $now.AddMinutes(-4) 40 120
+        New-TestProcess 760 700 'cmd.exe' 'C:\Windows\system32\cmd.exe /d /s /c npx -y @modelcontextprotocol/server-filesystem E:\claude code' $now.AddMinutes(-3) 5 5
+        New-TestProcess 761 760 'node.exe' 'node.exe npm-cli.js exec @modelcontextprotocol/server-filesystem E:\claude code' $now.AddMinutes(-3) 40 120
+        New-TestProcess 770 700 'cmd.exe' 'C:\Windows\system32\cmd.exe /d /s /c npx -y @modelcontextprotocol/server-filesystem E:\claude code' $now.AddMinutes(-2) 5 5
+        New-TestProcess 771 770 'node.exe' 'node.exe npm-cli.js exec @modelcontextprotocol/server-filesystem E:\claude code' $now.AddMinutes(-2) 40 120
+
         New-TestProcess 500 1 'cmd.exe' 'cmd.exe /c npm run dev' $currentSessionStart.AddMinutes(-10) 5 5
         New-TestProcess 501 500 'node.exe' 'node.exe E:\project\node_modules\vite\bin\vite.js --host 127.0.0.1' $currentSessionStart.AddMinutes(-10) 100 200
     )
@@ -839,6 +852,7 @@ function Invoke-CodexSelfTest {
         [pscustomobject]@{ name = 'pre-session missing parent chain cleanable'; passed = [bool]($scan.cleanable | Where-Object { $_.pid -eq 900 -or $_.pid -eq 901 -or $_.pid -eq 902 }) }
         [pscustomobject]@{ name = 'current session orphan suspicious'; passed = [bool]($scan.suspicious | Where-Object { $_.pid -eq 400 -or $_.pid -eq 401 -or $_.pid -eq 402 }) }
         [pscustomobject]@{ name = 'old duplicate desktop app-server cleanable in current-safe'; passed = [bool]($scan.cleanable | Where-Object { $_.pid -eq 740 -or $_.pid -eq 741 }) }
+        [pscustomobject]@{ name = 'young duplicate desktop app-server cleanable under pressure'; passed = [bool]($scan.cleanable | Where-Object { $_.pid -eq 750 -or $_.pid -eq 751 }) }
         [pscustomobject]@{ name = 'report-only keeps running codex cleanable empty'; passed = (@($reportOnlyScan.cleanable).Count -eq 0) }
         [pscustomobject]@{ name = 'vite dev server report-only'; passed = [bool]($scan.reportOnly | Where-Object { $_.pid -eq 500 -or $_.pid -eq 501 }) }
         [pscustomobject]@{ name = 'candidate groups include all groups'; passed = ($scan.summary.candidateGroupCount -ge 3 -and @($scan.candidateGroups).Count -eq $scan.summary.candidateGroupCount) }
@@ -846,6 +860,7 @@ function Invoke-CodexSelfTest {
         [pscustomobject]@{ name = 'safe trim skips codex desktop'; passed = (Test-SafeTrimSkipProcess (New-TestProcess 600 1 'Codex.exe' '"C:\Program Files\WindowsApps\OpenAI.Codex_test\app\Codex.exe" --type=renderer' $now 500 500) '') }
         [pscustomobject]@{ name = 'safe trim skips electron renderer'; passed = (Test-SafeTrimSkipProcess (New-TestProcess 601 1 'electron.exe' '"D:\app\electron.exe" --type=gpu-process' $now 500 500) '') }
         [pscustomobject]@{ name = 'safe trim skips node dev tool'; passed = (Test-SafeTrimSkipProcess (New-TestProcess 602 1 'node.exe' '"D:\nodejs\node.exe" "D:\project\node_modules\vite\bin\vite.js"' $now 500 500) '') }
+        [pscustomobject]@{ name = 'pressure trim allows codex working set'; passed = -not (Test-SafeTrimSkipProcess (New-TestProcess 604 1 'Codex.exe' '"C:\Program Files\WindowsApps\OpenAI.Codex_test\app\Codex.exe" --type=gpu-process' $now 500 500) '' $true) }
         [pscustomobject]@{ name = 'safe trim allows ordinary app'; passed = -not (Test-SafeTrimSkipProcess (New-TestProcess 603 1 'notepad.exe' '"C:\Windows\System32\notepad.exe"' $now 500 500) '') }
     )
 
@@ -859,6 +874,9 @@ function Invoke-CodexSelfTest {
 function Invoke-Trim {
     $before = Get-Snapshot
     Write-Log "Trim start: reason=$Reason used=$($before.usedPercent)% free=$($before.freeGB)GB"
+    $pressureTrimSensitive = ($before.usedPercent -ge 90 -or $before.commitPercent -ge $CodexCommitPressurePercent)
+    $rawCandidateLimit = if ($pressureTrimSensitive) { 200 } else { 48 }
+    $maxTrimTargets = if ($pressureTrimSensitive) { 80 } else { 24 }
 
     $skipNames = @(
         'Idle',
@@ -896,7 +914,7 @@ function Invoke-Trim {
             $skipNames -notcontains $_.ProcessName
         } |
         Sort-Object WorkingSet64 -Descending |
-        Select-Object -First 48)
+        Select-Object -First $rawCandidateLimit)
 
     $candidatePidSet = @{}
     foreach ($candidate in $rawCandidates) {
@@ -913,13 +931,14 @@ function Invoke-Trim {
     $candidates = @()
     foreach ($candidate in $rawCandidates) {
         $cmd = if ($candidateCommandLines.ContainsKey([int]$candidate.Id)) { $candidateCommandLines[[int]$candidate.Id] } else { '' }
-        if (Test-SafeTrimSkipProcess $candidate $cmd) {
+        if (Test-SafeTrimSkipProcess $candidate $cmd $pressureTrimSensitive) {
             $skippedSensitive++
             continue
         }
         $candidates += $candidate
-        if ($candidates.Count -ge 24) { break }
+        if ($candidates.Count -ge $maxTrimTargets) { break }
     }
+    Write-Log "Trim candidates: pressureSensitive=$pressureTrimSensitive raw=$($rawCandidates.Count) selected=$($candidates.Count) skippedSensitive=$skippedSensitive"
 
     foreach ($proc in $candidates) {
         try {
@@ -946,6 +965,9 @@ function Invoke-Trim {
         freedGB = $freedGB
         skippedForegroundPid = $foregroundPid
         skippedSensitiveProcesses = $skippedSensitive
+        pressureSensitiveTrim = $pressureTrimSensitive
+        rawCandidateCount = $rawCandidates.Count
+        selectedCandidateCount = $candidates.Count
     }
 }
 

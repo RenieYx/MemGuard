@@ -1,4 +1,4 @@
-# MemGuard V1.2
+# MemGuard V1.2.1
 
 MemGuard 是一个轻量 Windows 内存守护工具。它提供桌面内存小组件、手动/自动工作集修剪，以及专门针对 Codex Desktop 残留 MCP 工具链的 Codex Guard。
 
@@ -10,6 +10,7 @@ MemGuard 是一个轻量 Windows 内存守护工具。它提供桌面内存小�
 - 提供中文可视化设置面板、历史记录和日志入口。
 - Codex Guard 可扫描、预演并清理 Codex 遗留的 MCP/node/cmd 工具链。
 - V1.2 会按 Codex 工具分组显示候选进程和内存口径，并让普通清理避开活跃的 Codex/Electron/Chromium/Node 工具树。
+- V1.2.1 在内存或 commit 高压时会立即清理年轻但重复的 Codex desktop app-server 工具链，并对 Chrome/Codex/Electron 做工作集修剪。
 - V1.2 安装器支持覆盖升级，会在安装前停止旧版 MemGuard 相关进程，避免安装目录占用冲突。
 
 ## Codex Guard
@@ -38,7 +39,8 @@ V1.2 的 Codex Guard 会：
 - 每 20 分钟最多自动清理一次。
 - 只修剪工作集超过 180MB 的普通应用。
 - 启动时先执行一次温和清理。
-- Codex 运行中默认启用自动清理：只结束旧会话断链残留、旧会话父链缺失工具和旧的重复 desktop app-server 工具链，当前 stdio/app-server 链、最近启动链和无法确认的目标会被保护或列为“需人工确认”。
+- Codex 运行中默认启用自动清理：结束旧会话断链残留、旧会话父链缺失工具和重复 desktop app-server 工具链；当进程数或 commit 压力过高时，年轻重复链也会被清理，但每组仍保留最新 2 条。当前 stdio/app-server 链和无法确认的目标会被保护或列为“需人工确认”。
+- 高压工作集修剪不会杀当前 Codex/Chrome/Electron，只向 Windows 请求回收可释放的物理页。
 - Codex 运行中自动清理每 5 分钟最多触发一次，单轮最多结束 24 个目标；退出后残留仍会继续自动清理。
 
 ## 安装
@@ -52,8 +54,8 @@ npm run dist
 
 打包产物在 `dist` 目录：
 
-- `MemGuard-Setup-V1.2.0.exe`：安装版
-- `MemGuard-V1.2.0-x64.exe`：便携版
+- `MemGuard-Setup-V1.2.1.exe`：安装版
+- `MemGuard-V1.2.1-x64.exe`：便携版
 
 源码目录安装：
 
@@ -72,7 +74,7 @@ Install-or-Repair.bat
 直接运行新版安装包：
 
 ```text
-MemGuard-Setup-V1.2.0.exe
+MemGuard-Setup-V1.2.1.exe
 ```
 
 V1.2 安装器使用固定应用 GUID，并在安装前停止旧版 MemGuard 计划任务和 MemGuard 自身进程，避免版本迭代时出现安装冲突。
