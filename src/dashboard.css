@@ -8,13 +8,15 @@ body {
   min-height: 100%;
   margin: 0;
   overflow: hidden;
+  color-scheme: dark;
   color: #e5f7fb;
   background: #0f172a;
   font-family: "Microsoft YaHei UI", "Segoe UI", Arial, sans-serif;
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -50,18 +52,20 @@ input {
 }
 
 .window-controls button {
-  width: 36px;
-  height: 26px;
+  width: 38px;
+  height: 28px;
   padding: 0;
   border: 0;
   border-radius: 6px;
   color: #dffbff;
   background: transparent;
-  font-size: 16px;
-  line-height: 24px;
+  font-size: 17px;
+  line-height: 26px;
 }
 
 .window-controls button:hover {
+  transform: none;
+  box-shadow: none;
   background: rgba(125, 211, 252, 0.14);
 }
 
@@ -87,6 +91,132 @@ input {
   margin-bottom: 18px;
 }
 
+.action-status {
+  display: none;
+  margin: -6px 0 14px;
+  padding: 9px 11px;
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 7px;
+  color: #dbeafe;
+  background: rgba(14, 116, 144, 0.18);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.action-status:not(:empty) {
+  display: block;
+}
+
+.action-status.is-clear {
+  border-color: rgba(74, 222, 128, 0.22);
+  background: rgba(20, 83, 45, 0.22);
+}
+
+.action-status.is-actionable {
+  border-color: rgba(251, 146, 60, 0.38);
+  background: rgba(124, 45, 18, 0.28);
+}
+
+.action-status.is-busy {
+  border-color: rgba(125, 211, 252, 0.38);
+  background: rgba(14, 116, 144, 0.24);
+}
+
+.action-status.is-error {
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(127, 29, 29, 0.34);
+}
+
+.pressure-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: -2px 0 14px;
+  padding: 11px 13px;
+  border: 1px solid rgba(125, 211, 252, 0.22);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.pressure-action-bar > div {
+  min-width: 0;
+}
+
+.pressure-action-bar span,
+.pressure-action-bar strong,
+.pressure-action-bar small {
+  display: block;
+}
+
+#pressureActionLabel {
+  color: #9ccbd3;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 15px;
+}
+
+#pressureActionTitle {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #f8fafc;
+  font-size: 14px;
+  line-height: 19px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#pressureActionDetail {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #9ccbd3;
+  font-size: 11px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#pressureActionHint {
+  flex: 0 0 auto;
+  max-width: 260px;
+  overflow: hidden;
+  padding: 5px 8px;
+  border-radius: 7px;
+  color: #dffbff;
+  background: rgba(2, 6, 23, 0.3);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 15px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pressure-action-normal {
+  border-color: rgba(74, 222, 128, 0.2);
+  background: rgba(20, 83, 45, 0.17);
+}
+
+.pressure-action-watch {
+  border-color: rgba(250, 204, 21, 0.34);
+  background: rgba(66, 54, 8, 0.23);
+}
+
+.pressure-action-pressure {
+  border-color: rgba(251, 146, 60, 0.52);
+  background: rgba(124, 45, 18, 0.28);
+}
+
+.pressure-action-critical {
+  border-color: rgba(248, 113, 113, 0.72);
+  background: rgba(69, 10, 10, 0.48);
+}
+
+.button-recommended {
+  border-color: rgba(250, 204, 21, 0.9) !important;
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.16), 0 8px 22px rgba(15, 23, 42, 0.22);
+}
+
 h1,
 h2,
 p {
@@ -109,6 +239,16 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.actions button,
+.link-actions button {
+  min-width: 58px;
+}
+
+#cleanButton,
+#rescueButton {
+  min-width: 92px;
 }
 
 button {
@@ -163,9 +303,22 @@ button:disabled {
   background: rgba(194, 65, 12, 0.68);
 }
 
+.button-critical,
+#rescueButton {
+  border-color: rgba(248, 113, 113, 0.92);
+  color: #fff7f7;
+  background: rgba(185, 28, 28, 0.72);
+}
+
+.button-critical:hover,
+#rescueButton:hover {
+  border-color: rgba(254, 202, 202, 0.96);
+  background: rgba(220, 38, 38, 0.78);
+}
+
 .metrics {
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr;
+  grid-template-columns: 1.35fr repeat(5, minmax(112px, 1fr));
   gap: 12px;
   margin-bottom: 14px;
 }
@@ -193,14 +346,66 @@ button:disabled {
 .metric strong {
   display: block;
   margin-top: 6px;
+  overflow: hidden;
   color: #fff;
   font-size: 25px;
   line-height: 31px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .metric.main strong {
   font-size: 38px;
   line-height: 42px;
+}
+
+.runtime-card strong {
+  font-size: 19px;
+  line-height: 26px;
+}
+
+#lastTrim {
+  font-size: 23px;
+}
+
+.runtime-card small,
+.pressure-card small,
+.schedule-card small {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  color: #9ccbd3;
+  font-size: 11px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-card {
+  border-color: rgba(125, 211, 252, 0.24);
+}
+
+.runtime-card {
+  border-color: rgba(45, 212, 191, 0.24);
+}
+
+.pressure-normal {
+  border-color: rgba(74, 222, 128, 0.22);
+}
+
+.pressure-watch {
+  border-color: rgba(250, 204, 21, 0.34);
+  background: rgba(66, 54, 8, 0.22);
+}
+
+.pressure-pressure {
+  border-color: rgba(251, 146, 60, 0.52);
+  background: rgba(124, 45, 18, 0.28);
+}
+
+.pressure-critical {
+  border-color: rgba(248, 113, 113, 0.72);
+  background: rgba(69, 10, 10, 0.5);
 }
 
 .meter {
@@ -222,7 +427,7 @@ button:disabled {
 
 .grid {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 360px minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -248,6 +453,53 @@ h2 {
   font-size: 12px;
 }
 
+#applyLowResourceButton {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.settings-section {
+  padding: 2px 0 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.settings-section:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.settings-section h3 {
+  margin: 0 0 10px;
+  color: #dffbff;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 9px;
+  row-gap: 8px;
+}
+
+.settings-grid label,
+.settings-section > label {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.span-2 {
+  grid-column: 1 / -1;
+}
+
+.check-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 label {
   display: grid;
   gap: 5px;
@@ -257,7 +509,46 @@ label {
   font-weight: 700;
 }
 
-input {
+.field-hint {
+  color: #7da7b0;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 14px;
+}
+
+.setting-tip {
+  margin: 0 0 8px;
+  padding: 8px 9px;
+  border-left: 3px solid #22d3ee;
+  border-radius: 6px;
+  color: #c8f7ff;
+  background: rgba(14, 116, 144, 0.16);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.advanced-settings {
+  margin-top: 9px;
+  padding: 8px 9px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 7px;
+  background: rgba(2, 6, 23, 0.18);
+}
+
+.advanced-settings summary {
+  cursor: pointer;
+  color: #dffbff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 16px;
+}
+
+.advanced-settings .field-hint {
+  margin: 6px 0 8px;
+}
+
+input,
+select {
   width: 100%;
   height: 31px;
   padding: 0 9px;
@@ -267,8 +558,19 @@ input {
   background: rgba(2, 6, 23, 0.4);
 }
 
+select {
+  appearance: none;
+  padding-right: 28px;
+  background:
+    linear-gradient(45deg, transparent 50%, #dffbff 50%) calc(100% - 17px) 13px / 6px 6px no-repeat,
+    linear-gradient(135deg, #dffbff 50%, transparent 50%) calc(100% - 12px) 13px / 6px 6px no-repeat,
+    rgba(2, 6, 23, 0.4);
+}
+
 input:hover,
-input:focus {
+input:focus,
+select:hover,
+select:focus {
   border-color: rgba(125, 211, 252, 0.65);
   outline: none;
 }
@@ -277,16 +579,36 @@ input:focus {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 26px;
+  margin-bottom: 0;
+  padding: 7px 9px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 7px;
+  background: rgba(2, 6, 23, 0.22);
+  line-height: 16px;
 }
 
 .checkbox input {
+  appearance: none;
+  flex: 0 0 auto;
   width: 16px;
   height: 16px;
+  padding: 0;
+  border-radius: 4px;
+  background: rgba(2, 6, 23, 0.48);
+}
+
+.checkbox input:checked {
+  border-color: rgba(34, 211, 238, 0.9);
+  background:
+    linear-gradient(135deg, transparent 0 42%, #fff 42% 57%, transparent 57%) 3px 7px / 5px 5px no-repeat,
+    linear-gradient(45deg, transparent 0 43%, #fff 43% 58%, transparent 58%) 7px 3px / 7px 9px no-repeat,
+    linear-gradient(135deg, #22d3ee, #34d399);
 }
 
 .save {
   width: 100%;
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .history-list {
@@ -449,6 +771,25 @@ input:focus {
 
 .process-column {
   min-width: 0;
+  padding: 9px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.18);
+}
+
+.process-column-cleanable {
+  border-left: 4px solid rgba(251, 146, 60, 0.86);
+  background: rgba(124, 45, 18, 0.16);
+}
+
+.process-column-protected {
+  border-left: 4px solid rgba(52, 211, 153, 0.72);
+  background: rgba(6, 78, 59, 0.16);
+}
+
+.process-column-suspicious {
+  border-left: 4px solid rgba(250, 204, 21, 0.78);
+  background: rgba(113, 63, 18, 0.15);
 }
 
 .codex-group-list {
@@ -531,6 +872,21 @@ input:focus {
   text-align: center;
 }
 
+.process-column-cleanable h3 span {
+  color: #fff7ed;
+  background: rgba(194, 65, 12, 0.42);
+}
+
+.process-column-protected h3 span {
+  color: #dcfce7;
+  background: rgba(22, 101, 52, 0.4);
+}
+
+.process-column-suspicious h3 span {
+  color: #fef9c3;
+  background: rgba(161, 98, 7, 0.4);
+}
+
 .process-list {
   display: grid;
   gap: 7px;
@@ -583,8 +939,12 @@ input:focus {
     margin-bottom: 14px;
   }
 
+  .pressure-action-bar {
+    align-items: flex-start;
+  }
+
   .metrics {
-    grid-template-columns: 1.25fr 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
   }
 
@@ -601,6 +961,18 @@ input:focus {
   .grid {
     grid-template-columns: 248px minmax(0, 1fr);
     gap: 10px;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .check-list {
+    grid-template-columns: 1fr;
+  }
+
+  .span-2 {
+    grid-column: auto;
   }
 
   .panel {
@@ -657,11 +1029,31 @@ input:focus {
     flex: 1 1 110px;
   }
 
+  .pressure-action-bar {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  #pressureActionTitle,
+  #pressureActionDetail,
+  #pressureActionHint {
+    max-width: none;
+    width: 100%;
+    text-align: left;
+    white-space: normal;
+  }
+
   .metrics,
   .grid,
+  .settings-grid,
+  .check-list,
   .codex-group-list,
   .codex-summary,
   .codex-lists {
     grid-template-columns: 1fr;
+  }
+
+  .span-2 {
+    grid-column: auto;
   }
 }

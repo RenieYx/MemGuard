@@ -68,7 +68,7 @@ try {
     $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'MemGuard: compact memory guard widget.' -Force | Out-Null
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'MemGuard: silent low-resource background memory guard.' -Force | Out-Null
     if (Test-Path -LiteralPath $startupShortcutPath) {
         Remove-Item -LiteralPath $startupShortcutPath -Force
     }

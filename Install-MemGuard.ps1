@@ -69,7 +69,7 @@ try {
     $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable
 
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'MemGuard: startup trim plus a compact floating memory status window.' -Force | Out-Null
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'MemGuard: silent low-resource background memory guard.' -Force | Out-Null
     if (Test-Path -LiteralPath $startupShortcutPath) {
         Remove-Item -LiteralPath $startupShortcutPath -Force
     }
