@@ -91,6 +91,39 @@ function verifyTrimPlan() {
   }
 }
 
+function verifyAutoReliefPolicy() {
+  console.log('\n> auto relief policy');
+  const {
+    isPressureActive,
+    shouldCountHighCheck,
+    trimCooldownMs,
+    shouldAutoTrim,
+    shouldSkipTrimAfterCodex
+  } = require(path.join(root, 'src', 'auto-relief'));
+  const config = {
+    triggerPercent: 85,
+    cooldownMinutes: 20,
+    consecutiveHighChecks: 2,
+    memoryMode: 'aggressive'
+  };
+  const normal = { pressureLevel: 'normal', usedPercent: 62, freeGB: 5.8, commitPercent: 42 };
+  const watch = { pressureLevel: 'watch', usedPercent: 79, freeGB: 2.2, commitPercent: 68 };
+  const pressure = { pressureLevel: 'pressure', usedPercent: 89, freeGB: 1.3, commitPercent: 83 };
+  const critical = { pressureLevel: 'critical', usedPercent: 95, freeGB: 0.6, commitPercent: 93 };
+  const now = 1_000_000;
+
+  assertVerify(isPressureActive(normal, config) === false, 'normal memory must not be treated as pressure');
+  assertVerify(shouldCountHighCheck(normal, config) === false, 'normal memory must not count toward auto trim');
+  assertVerify(shouldCountHighCheck(watch, config) === true, 'aggressive watch pressure must count toward smart observation');
+  assertVerify(shouldAutoTrim({ snapshot: watch, config, highCount: 1, lastAutoTrim: 0, now }) === false, 'one watch tick must not auto trim before consecutive threshold');
+  assertVerify(shouldAutoTrim({ snapshot: pressure, config, highCount: 2, lastAutoTrim: now - 120_000, now }) === false, 'pressure auto trim must respect the shortened cooldown');
+  assertVerify(shouldAutoTrim({ snapshot: pressure, config, highCount: 2, lastAutoTrim: now - 240_000, now }) === true, 'pressure auto trim must run after consecutive checks and cooldown');
+  assertVerify(trimCooldownMs(critical, config) === 60_000, 'critical pressure must use a one-minute cooldown cap');
+  assertVerify(shouldSkipTrimAfterCodex({ snapshot: normal, config }) === true, 'Codex cleanup that returns normal pressure must suppress real trim');
+  assertVerify(shouldSkipTrimAfterCodex({ snapshot: pressure, config }) === false, 'Codex cleanup that leaves pressure must not suppress real trim');
+  assertVerify(shouldSkipTrimAfterCodex({ snapshot: { pressureLevel: 'normal', usedPercent: 88 }, config }) === false, 'high usedPercent must still allow real trim even when pressure label is normal');
+}
+
 function verifyCodexSelfTest() {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'memguard-self-test-data-'));
   try {
@@ -139,6 +172,7 @@ function verifyPackageConfig() {
   const buildFiles = pkg && pkg.build && Array.isArray(pkg.build.files) ? pkg.build.files : [];
   const requiredRuntimeFiles = [
     'src/main.js',
+    'src/auto-relief.js',
     'src/preload.js',
     'src/renderer.html',
     'src/renderer.js',
@@ -321,10 +355,15 @@ function verifyLowResourceHotPaths() {
   assertVerify(main.includes('codexScanInFlight') && main.includes('invalidateCodexScanCache'), 'Codex scan must reuse in-flight work and clear stale scan state after cleaning');
   assertVerify(main.includes('if (!force && codexScanInFlight)') && main.includes('codexScanInFlight = run'), 'non-forced Codex scans must reuse the in-flight scan promise');
   assertVerify(main.includes('codexScanGeneration') && main.includes('generation === codexScanGeneration'), 'Codex scan cache writes must be guarded against stale in-flight results');
+  assertVerify(main.includes("require('./auto-relief')"), 'main must use the pure auto-relief decision policy');
+  assertVerify(main.includes('shouldSkipTrimAfterCodex') && main.includes('Auto trim skipped: pressure relieved after Codex clean'), 'background loop must skip real trim when Codex cleanup relieves pressure');
+  assertVerify(main.includes('shouldAutoTrim({ snapshot: trimSnapshot'), 'background auto trim must evaluate the latest post-Codex snapshot');
+  assertVerify(main.includes('retryBackoffMs') && main.includes('lastCodexAutoClean = now - retryBackoffMs'), 'failed Codex auto-clean must use a short retry backoff instead of a full cooldown');
 }
 
 for (const file of [
   'src/main.js',
+  'src/auto-relief.js',
   'src/preload.js',
   'src/renderer.js',
   'src/dashboard.js',
@@ -343,6 +382,7 @@ for (const file of [
 
 run('snapshot benchmark', process.execPath, ['src/snapshot-benchmark.js', '1000']);
 verifyCodexSelfTest();
+verifyAutoReliefPolicy();
 verifyPackageConfig();
 verifyInstallerScripts();
 verifyRuntimeBenchmarkHelp();

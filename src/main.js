@@ -3,6 +3,11 @@ const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { createFastSnapshot } = require('./system-snapshot');
+const {
+  shouldCountHighCheck,
+  shouldAutoTrim,
+  shouldSkipTrimAfterCodex
+} = require('./auto-relief');
 
 const ROOT = path.resolve(__dirname, '..');
 const overrideUserData = process.env.MEMGUARD_USER_DATA_DIR;
@@ -714,6 +719,10 @@ async function autoCleanCodex(scan, now = Date.now()) {
     recordCodexHistory(result, reason);
     invalidateCodexScanCache();
     return result;
+  } catch (error) {
+    const retryBackoffMs = Math.min(30_000, Math.max(5_000, Number(config.codexScanIntervalSeconds || defaultConfig.codexScanIntervalSeconds) * 1000));
+    lastCodexAutoClean = now - retryBackoffMs;
+    throw error;
   } finally {
     codexAutoCleanInFlight = false;
   }
@@ -939,30 +948,34 @@ async function publishSnapshot() {
       return;
     }
 
-    const pressureLevel = snapshot.pressureLevel || 'normal';
-    const pressureActive = ['watch', 'pressure', 'critical'].includes(pressureLevel);
-    if (snapshot.usedPercent >= config.triggerPercent || (config.memoryMode === 'aggressive' && pressureActive)) {
+    if (shouldCountHighCheck(snapshot, config)) {
       highCount += 1;
     } else {
       highCount = 0;
     }
 
     const now = Date.now();
+    let trimSnapshot = snapshot;
     if (config.codexGuardEnabled) {
       try {
         const codex = await codexScan(false);
-        await autoCleanCodex(codex, now);
+        const codexCleanResult = await autoCleanCodex(codex, now);
+        const afterCodexSnapshot = codexCleanResult && codexCleanResult.after && codexCleanResult.after.snapshot
+          ? codexCleanResult.after.snapshot
+          : null;
+        if (afterCodexSnapshot) {
+          trimSnapshot = afterCodexSnapshot;
+          if (shouldSkipTrimAfterCodex({ snapshot: afterCodexSnapshot, config })) {
+            highCount = 0;
+            writeAppLog(`Auto trim skipped: pressure relieved after Codex clean; level=${afterCodexSnapshot.pressureLevel || 'normal'} used=${afterCodexSnapshot.usedPercent}% free=${afterCodexSnapshot.freeGB}GB`);
+          }
+        }
       } catch (error) {
         writeAppLog(`Codex guard error: ${error.message}`);
       }
     }
 
-    const trimCooldownMs = pressureLevel === 'critical'
-      ? Math.min(60_000, config.cooldownMinutes * 60 * 1000)
-      : pressureLevel === 'pressure'
-        ? Math.min(180_000, config.cooldownMinutes * 60 * 1000)
-        : config.cooldownMinutes * 60 * 1000;
-    if (highCount >= config.consecutiveHighChecks && now - lastAutoTrim > trimCooldownMs) {
+    if (shouldAutoTrim({ snapshot: trimSnapshot, config, highCount, lastAutoTrim, now })) {
       lastAutoTrim = now;
       highCount = 0;
       const result = await runEngine('trim', 'auto');

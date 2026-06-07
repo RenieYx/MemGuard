@@ -27,6 +27,7 @@
     ],
     "files": [
       "src/main.js",
+      "src/auto-relief.js",
       "src/preload.js",
       "src/renderer.html",
       "src/renderer.js",
