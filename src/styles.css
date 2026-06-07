@@ -5,8 +5,8 @@
 
 html,
 body {
-  width: 240px;
-  height: 92px;
+  width: 244px;
+  height: 96px;
   margin: 0;
   overflow: hidden;
   background: transparent;
@@ -19,7 +19,7 @@ body {
   position: relative;
   width: 240px;
   height: 92px;
-  margin: 0;
+  margin: 2px;
   padding: 18px 14px 12px;
   overflow: hidden;
   display: grid;
@@ -181,8 +181,33 @@ body {
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.82), transparent);
 }
 
+.card.watch {
+  border-color: rgba(250, 204, 21, 0.72);
+  background: linear-gradient(135deg, #111827 0%, #3f3310 58%, #0f766e 100%);
+}
+
+.card.watch .fill {
+  background: linear-gradient(90deg, #22d3ee, #facc15);
+}
+
+.card.pressure,
+.card.high {
+  border-color: rgba(251, 146, 60, 0.86);
+  background: linear-gradient(135deg, #1f1308 0%, #7c2d12 58%, #164e63 100%);
+}
+
+.card.pressure .fill,
 .card.high .fill {
   background: linear-gradient(90deg, #facc15, #fb923c, #f97316);
+}
+
+.card.critical {
+  border-color: rgba(248, 113, 113, 0.96);
+  background: linear-gradient(135deg, #1f0b0b 0%, #7f1d1d 58%, #3f1d2d 100%);
+}
+
+.card.critical .fill {
+  background: linear-gradient(90deg, #fb923c, #ef4444, #fca5a5);
 }
 
 .card.paused .fill {

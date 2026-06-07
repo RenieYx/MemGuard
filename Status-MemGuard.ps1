@@ -7,23 +7,28 @@ $os = Get-CimInstance Win32_OperatingSystem
 $usedPercent = [math]::Round((1 - ($os.FreePhysicalMemory / $os.TotalVisibleMemorySize)) * 100, 1)
 $totalGB = [math]::Round($os.TotalVisibleMemorySize / 1MB, 2)
 $freeGB = [math]::Round($os.FreePhysicalMemory / 1MB, 2)
+$dataRoot = if ($env:MEMGUARD_USER_DATA_DIR) {
+    Join-Path $env:MEMGUARD_USER_DATA_DIR 'data'
+} else {
+    Join-Path $env:APPDATA 'memguard\data'
+}
 
-Write-Host "MemGuard"
-Write-Host "--------"
+Write-Host 'MemGuard'
+Write-Host '--------'
 if ($task) {
     Write-Host "Task state : $($task.State)"
     Write-Host "Last run   : $($info.LastRunTime)"
     Write-Host "Last result: $($info.LastTaskResult)"
 } else {
-    Write-Host "Task state : Not installed"
+    Write-Host 'Task state : Not installed'
 }
 
 Write-Host "Memory     : used ${usedPercent}% / free ${freeGB}GB / total ${totalGB}GB"
-$configFile = Join-Path $PSScriptRoot 'config.json'
+$configFile = Join-Path $dataRoot 'config.json'
 if (Test-Path -LiteralPath $configFile) {
     Write-Host "Config     : $configFile"
 }
-$historyFile = Join-Path $PSScriptRoot 'history.json'
+$historyFile = Join-Path $dataRoot 'history.json'
 if (Test-Path -LiteralPath $historyFile) {
     $history = Get-Content -LiteralPath $historyFile -Raw | ConvertFrom-Json
     $count = if ($history) { @($history).Count } else { 0 }
@@ -38,18 +43,18 @@ $widget = Get-CimInstance Win32_Process |
     } |
     Select-Object -First 1
 if ($widget) {
-    Write-Host "Widget PID : $($widget.ProcessId)"
+    Write-Host "Process PID: $($widget.ProcessId)"
 } else {
-    Write-Host "Widget PID : not running"
+    Write-Host 'Process PID: not running'
 }
-Write-Host ""
+Write-Host ''
 
-$logDir = Join-Path $PSScriptRoot 'logs'
+$logDir = Join-Path $dataRoot 'logs'
 $latest = Get-ChildItem -LiteralPath $logDir -Filter '*.log' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($latest) {
     Write-Host "Latest log : $($latest.FullName)"
-    Write-Host ""
+    Write-Host ''
     Get-Content -LiteralPath $latest.FullName -Tail 12
 } else {
-    Write-Host "Latest log : none"
+    Write-Host 'Latest log : none'
 }

@@ -1,9 +1,10 @@
 param(
-    [ValidateSet('snapshot', 'trim', 'codex-scan', 'codex-clean', 'codex-self-test')]
+    [ValidateSet('snapshot', 'trim', 'rescue', 'trim-plan', 'codex-scan', 'codex-clean', 'codex-self-test')]
     [string]$Mode = 'snapshot',
     [int]$MinProcessMB = 180,
     [string]$Reason = 'manual',
     [string]$DataDir = '',
+    [string]$MemoryMode = 'aggressive',
     [int]$CodexStaleMinutes = 10,
     [int]$CodexMaxMcpProcesses = 40,
     [int]$CodexCommitPressurePercent = 85,
@@ -19,6 +20,10 @@ $ErrorActionPreference = 'SilentlyContinue'
 $validCodexCleanWhileRunningModes = @('report-only', 'orphan-only', 'current-safe', 'allow-stale')
 if ($validCodexCleanWhileRunningModes -notcontains $CodexCleanWhileRunning) {
     $CodexCleanWhileRunning = 'current-safe'
+}
+$validMemoryModes = @('balanced', 'aggressive')
+if ($validMemoryModes -notcontains $MemoryMode) {
+    $MemoryMode = 'aggressive'
 }
 
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -37,8 +42,30 @@ using System.Text;
 
 public static class NativeMemoryTools
 {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PERFORMANCE_INFORMATION
+    {
+        public int cb;
+        public UIntPtr CommitTotal;
+        public UIntPtr CommitLimit;
+        public UIntPtr CommitPeak;
+        public UIntPtr PhysicalTotal;
+        public UIntPtr PhysicalAvailable;
+        public UIntPtr SystemCache;
+        public UIntPtr KernelTotal;
+        public UIntPtr KernelPaged;
+        public UIntPtr KernelNonpaged;
+        public UIntPtr PageSize;
+        public uint HandleCount;
+        public uint ProcessCount;
+        public uint ThreadCount;
+    }
+
     [DllImport("psapi.dll")]
     public static extern bool EmptyWorkingSet(IntPtr hProcess);
+
+    [DllImport("psapi.dll", SetLastError=true)]
+    public static extern bool GetPerformanceInfo(out PERFORMANCE_INFORMATION performanceInformation, int cb);
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
@@ -54,18 +81,154 @@ function Write-Log {
     Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
 }
 
+function Convert-UIntPtrToDouble {
+    param([object]$Value)
+    try {
+        return [double]$Value.ToUInt64()
+    } catch {
+        return [double]$Value
+    }
+}
+
+function Convert-PagesToGB {
+    param(
+        [object]$Pages,
+        [object]$PageSize
+    )
+    $pageCount = Convert-UIntPtrToDouble $Pages
+    $bytesPerPage = Convert-UIntPtrToDouble $PageSize
+    if ($bytesPerPage -le 0) { return 0 }
+    return [math]::Round(($pageCount * $bytesPerPage) / 1GB, 2)
+}
+
+function Get-PerformanceSnapshot {
+    $info = New-Object 'NativeMemoryTools+PERFORMANCE_INFORMATION'
+    $info.cb = [System.Runtime.InteropServices.Marshal]::SizeOf([type]'NativeMemoryTools+PERFORMANCE_INFORMATION')
+    if (-not [NativeMemoryTools]::GetPerformanceInfo([ref]$info, $info.cb)) {
+        return $null
+    }
+
+    $totalGB = Convert-PagesToGB $info.PhysicalTotal $info.PageSize
+    $freeGB = Convert-PagesToGB $info.PhysicalAvailable $info.PageSize
+    $usedGB = [math]::Max(0, [math]::Round($totalGB - $freeGB, 2))
+    $commitUsedGB = Convert-PagesToGB $info.CommitTotal $info.PageSize
+    $commitTotalGB = Convert-PagesToGB $info.CommitLimit $info.PageSize
+    $commitPeakGB = Convert-PagesToGB $info.CommitPeak $info.PageSize
+
+    [pscustomobject]@{
+        totalGB = $totalGB
+        freeGB = $freeGB
+        usedGB = $usedGB
+        usedPercent = if ($totalGB -gt 0) { [math]::Round(($usedGB / $totalGB) * 100, 1) } else { 0 }
+        commitUsedGB = $commitUsedGB
+        commitTotalGB = $commitTotalGB
+        commitPeakGB = $commitPeakGB
+        commitPercent = if ($commitTotalGB -gt 0) { [math]::Round(($commitUsedGB / $commitTotalGB) * 100, 1) } else { 0 }
+        systemCacheGB = Convert-PagesToGB $info.SystemCache $info.PageSize
+        processCount = [int]$info.ProcessCount
+        handleCount = [int]$info.HandleCount
+        threadCount = [int]$info.ThreadCount
+    }
+}
+
+function Get-MemoryPressure {
+    param([object]$Snapshot)
+    $score = 0
+    $reasons = @()
+    $used = [double]$Snapshot.usedPercent
+    $commit = [double]$Snapshot.commitPercent
+    $free = [double]$Snapshot.freeGB
+
+    if ($used -ge 94) {
+        $score += 55
+        $reasons += "physical-critical:${used}%"
+    } elseif ($used -ge 88) {
+        $score += 38
+        $reasons += "physical-pressure:${used}%"
+    } elseif ($used -ge 78) {
+        $score += 20
+        $reasons += "physical-watch:${used}%"
+    }
+
+    if ($commit -ge 92) {
+        $score += 55
+        $reasons += "commit-critical:${commit}%"
+    } elseif ($commit -ge 82) {
+        $score += 36
+        $reasons += "commit-pressure:${commit}%"
+    } elseif ($commit -ge 70) {
+        $score += 18
+        $reasons += "commit-watch:${commit}%"
+    }
+
+    if ($free -le 0.8) {
+        $score += 45
+        $reasons += "free-critical:${free}GB"
+    } elseif ($free -le 1.5) {
+        $score += 30
+        $reasons += "free-pressure:${free}GB"
+    } elseif ($free -le 2.5) {
+        $score += 16
+        $reasons += "free-watch:${free}GB"
+    }
+
+    if ($Snapshot.PSObject.Properties['handleCount'] -and [int]$Snapshot.handleCount -ge 350000) {
+        $score += 12
+        $reasons += "handles-high:$($Snapshot.handleCount)"
+    }
+    if ($Snapshot.PSObject.Properties['processCount'] -and [int]$Snapshot.processCount -ge 360) {
+        $score += 8
+        $reasons += "process-count-high:$($Snapshot.processCount)"
+    }
+
+    $level = 'normal'
+    if ($score -ge 70 -or $used -ge 94 -or $commit -ge 92 -or $free -le 0.8) {
+        $level = 'critical'
+    } elseif ($score -ge 45 -or $used -ge 88 -or $commit -ge 82 -or $free -le 1.5) {
+        $level = 'pressure'
+    } elseif ($score -ge 20 -or $used -ge 78 -or $commit -ge 70 -or $free -le 2.5) {
+        $level = 'watch'
+    }
+
+    [pscustomobject]@{
+        level = $level
+        score = [math]::Min(100, $score)
+        reasons = @($reasons)
+    }
+}
+
 function Get-Snapshot {
-    $os = Get-CimInstance Win32_OperatingSystem
-    $totalKb = [double]$os.TotalVisibleMemorySize
-    $freeKb = [double]$os.FreePhysicalMemory
-    $usedPercent = [math]::Round((1 - ($freeKb / $totalKb)) * 100, 1)
-    $totalVirtualKb = [double]$os.TotalVirtualMemorySize
-    $freeVirtualKb = [double]$os.FreeVirtualMemory
-    $commitUsedKb = $totalVirtualKb - $freeVirtualKb
-    $commitPercent = if ($totalVirtualKb -gt 0) {
-        [math]::Round(($commitUsedKb / $totalVirtualKb) * 100, 1)
+    $perf = Get-PerformanceSnapshot
+    if ($perf) {
+        $snapshot = $perf
     } else {
-        0
+        $os = Get-CimInstance Win32_OperatingSystem
+        $totalKb = [double]$os.TotalVisibleMemorySize
+        $freeKb = [double]$os.FreePhysicalMemory
+        $usedPercent = [math]::Round((1 - ($freeKb / $totalKb)) * 100, 1)
+        $totalVirtualKb = [double]$os.TotalVirtualMemorySize
+        $freeVirtualKb = [double]$os.FreeVirtualMemory
+        $commitUsedKb = $totalVirtualKb - $freeVirtualKb
+        $commitPercent = if ($totalVirtualKb -gt 0) {
+            [math]::Round(($commitUsedKb / $totalVirtualKb) * 100, 1)
+        } else {
+            0
+        }
+
+        $snapshot = [pscustomobject]@{
+            totalGB = [math]::Round($totalKb / 1MB, 2)
+            freeGB = [math]::Round($freeKb / 1MB, 2)
+            usedGB = [math]::Round(($totalKb - $freeKb) / 1MB, 2)
+            usedPercent = $usedPercent
+            commitUsedGB = [math]::Round($commitUsedKb / 1MB, 2)
+            commitTotalGB = [math]::Round($totalVirtualKb / 1MB, 2)
+            commitPeakGB = $null
+            commitPercent = $commitPercent
+            systemCacheGB = $null
+            processCount = $null
+            handleCount = $null
+            threadCount = $null
+        }
     }
 
     $lastTrim = $null
@@ -77,17 +240,14 @@ function Get-Snapshot {
         }
     }
 
-    [pscustomobject]@{
-        totalGB = [math]::Round($totalKb / 1MB, 2)
-        freeGB = [math]::Round($freeKb / 1MB, 2)
-        usedGB = [math]::Round(($totalKb - $freeKb) / 1MB, 2)
-        usedPercent = $usedPercent
-        commitUsedGB = [math]::Round($commitUsedKb / 1MB, 2)
-        commitTotalGB = [math]::Round($totalVirtualKb / 1MB, 2)
-        commitPercent = $commitPercent
-        lastTrim = $lastTrim
-        timestamp = (Get-Date).ToString('o')
-    }
+    $pressure = Get-MemoryPressure $snapshot
+    $snapshot | Add-Member -NotePropertyName pressureLevel -NotePropertyValue $pressure.level -Force
+    $snapshot | Add-Member -NotePropertyName pressureScore -NotePropertyValue $pressure.score -Force
+    $snapshot | Add-Member -NotePropertyName pressureReasons -NotePropertyValue @($pressure.reasons) -Force
+    $snapshot | Add-Member -NotePropertyName memoryMode -NotePropertyValue $MemoryMode -Force
+    $snapshot | Add-Member -NotePropertyName lastTrim -NotePropertyValue $lastTrim -Force
+    $snapshot | Add-Member -NotePropertyName timestamp -NotePropertyValue (Get-Date).ToString('o') -Force
+    $snapshot
 }
 
 function Convert-ToBool {
@@ -871,12 +1031,91 @@ function Invoke-CodexSelfTest {
     }
 }
 
+function Get-TrimProfile {
+    param([object]$Snapshot)
+    $level = [string]$Snapshot.pressureLevel
+    $aggressive = $MemoryMode -eq 'aggressive'
+    $rescue = $Mode -eq 'rescue' -or $Reason -eq 'rescue'
+    $sensitive = $false
+    $rawLimit = 48
+    $targetLimit = 24
+    $effectiveMinMB = $MinProcessMB
+
+    if ($rescue) {
+        $sensitive = $true
+        $rawLimit = 260
+        $targetLimit = 120
+        $effectiveMinMB = [math]::Min($MinProcessMB, 90)
+    } elseif ($level -eq 'critical') {
+        $sensitive = $aggressive
+        $rawLimit = if ($aggressive) { 240 } else { 96 }
+        $targetLimit = if ($aggressive) { 96 } else { 32 }
+        $effectiveMinMB = if ($aggressive) { [math]::Min($MinProcessMB, 100) } else { $MinProcessMB }
+    } elseif ($level -eq 'pressure') {
+        $sensitive = $aggressive
+        $rawLimit = if ($aggressive) { 180 } else { 72 }
+        $targetLimit = if ($aggressive) { 72 } else { 28 }
+        $effectiveMinMB = if ($aggressive) { [math]::Min($MinProcessMB, 120) } else { $MinProcessMB }
+    } elseif ($level -eq 'watch' -and $aggressive) {
+        $sensitive = $true
+        $rawLimit = 120
+        $targetLimit = 40
+        $effectiveMinMB = [math]::Min($MinProcessMB, 140)
+    }
+
+    [pscustomobject]@{
+        allowSensitive = $sensitive
+        rawLimit = $rawLimit
+        targetLimit = $targetLimit
+        effectiveMinProcessMB = $effectiveMinMB
+        rescue = $rescue
+        aggressive = $aggressive
+        pressureLevel = $level
+    }
+}
+
+function New-TrimCandidateRecord {
+    param(
+        [object]$Process,
+        [string]$CommandLine,
+        [string]$SelectionReason
+    )
+
+    [pscustomobject]@{
+        pid = [int]$Process.Id
+        name = [string]$Process.ProcessName
+        selectionReason = $SelectionReason
+        workingSetBeforeMB = [math]::Round(([double]$Process.WorkingSet64) / 1MB, 1)
+        privateBeforeMB = [math]::Round(([double]$Process.PrivateMemorySize64) / 1MB, 1)
+        handleCount = [int]$Process.HandleCount
+        commandLine = if ($CommandLine.Length -gt 220) { $CommandLine.Substring(0, 217) + '...' } else { $CommandLine }
+    }
+}
+
+function Complete-TrimCandidateRecord {
+    param(
+        [object]$Record,
+        [bool]$Trimmed,
+        [string]$ErrorMessage = ''
+    )
+
+    $after = Get-Process -Id ([int]$Record.pid) -ErrorAction SilentlyContinue
+    $afterMB = if ($after) { [math]::Round(([double]$after.WorkingSet64) / 1MB, 1) } else { $null }
+    $privateAfterMB = if ($after) { [math]::Round(([double]$after.PrivateMemorySize64) / 1MB, 1) } else { $null }
+    $freedMB = if ($afterMB -ne $null) { [math]::Max(0, [math]::Round(([double]$Record.workingSetBeforeMB - $afterMB), 1)) } else { $null }
+
+    $Record | Add-Member -NotePropertyName trimmed -NotePropertyValue $Trimmed -Force
+    $Record | Add-Member -NotePropertyName workingSetAfterMB -NotePropertyValue $afterMB -Force
+    $Record | Add-Member -NotePropertyName privateAfterMB -NotePropertyValue $privateAfterMB -Force
+    $Record | Add-Member -NotePropertyName freedWorkingSetMB -NotePropertyValue $freedMB -Force
+    $Record | Add-Member -NotePropertyName error -NotePropertyValue $ErrorMessage -Force
+    $Record
+}
+
 function Invoke-Trim {
     $before = Get-Snapshot
-    Write-Log "Trim start: reason=$Reason used=$($before.usedPercent)% free=$($before.freeGB)GB"
-    $pressureTrimSensitive = ($before.usedPercent -ge 90 -or $before.commitPercent -ge $CodexCommitPressurePercent)
-    $rawCandidateLimit = if ($pressureTrimSensitive) { 200 } else { 48 }
-    $maxTrimTargets = if ($pressureTrimSensitive) { 80 } else { 24 }
+    $profile = Get-TrimProfile $before
+    Write-Log "Trim start: reason=$Reason mode=$MemoryMode profile=$($profile.pressureLevel) rescue=$($profile.rescue) allowSensitive=$($profile.allowSensitive) used=$($before.usedPercent)% commit=$($before.commitPercent)% free=$($before.freeGB)GB"
 
     $skipNames = @(
         'Idle',
@@ -908,13 +1147,13 @@ function Invoke-Trim {
     $rawCandidates = @(Get-Process |
         Where-Object {
             $_.Id -gt 4 -and
-            $_.Id -ne $currentPid -and
-            $_.Id -ne $foregroundPid -and
-            $_.WorkingSet64 -ge ($MinProcessMB * 1MB) -and
-            $skipNames -notcontains $_.ProcessName
-        } |
-        Sort-Object WorkingSet64 -Descending |
-        Select-Object -First $rawCandidateLimit)
+             $_.Id -ne $currentPid -and
+             $_.Id -ne $foregroundPid -and
+             $_.WorkingSet64 -ge ($profile.effectiveMinProcessMB * 1MB) -and
+             $skipNames -notcontains $_.ProcessName
+         } |
+         Sort-Object WorkingSet64 -Descending |
+         Select-Object -First $profile.rawLimit)
 
     $candidatePidSet = @{}
     foreach ($candidate in $rawCandidates) {
@@ -927,30 +1166,63 @@ function Invoke-Trim {
         }
     }
 
-    $skippedSensitive = 0
-    $candidates = @()
-    foreach ($candidate in $rawCandidates) {
-        $cmd = if ($candidateCommandLines.ContainsKey([int]$candidate.Id)) { $candidateCommandLines[[int]$candidate.Id] } else { '' }
-        if (Test-SafeTrimSkipProcess $candidate $cmd $pressureTrimSensitive) {
-            $skippedSensitive++
-            continue
-        }
-        $candidates += $candidate
-        if ($candidates.Count -ge $maxTrimTargets) { break }
-    }
-    Write-Log "Trim candidates: pressureSensitive=$pressureTrimSensitive raw=$($rawCandidates.Count) selected=$($candidates.Count) skippedSensitive=$skippedSensitive"
+     $skippedSensitive = 0
+     $skippedSensitiveRecords = @()
+     $candidates = @()
+     $candidateRecords = @()
+     foreach ($candidate in $rawCandidates) {
+         $cmd = if ($candidateCommandLines.ContainsKey([int]$candidate.Id)) { $candidateCommandLines[[int]$candidate.Id] } else { '' }
+         if (Test-SafeTrimSkipProcess $candidate $cmd $profile.allowSensitive) {
+             $skippedSensitive++
+             $skippedSensitiveRecords += New-TrimCandidateRecord $candidate $cmd "skipped-sensitive;mode=$MemoryMode;pressure=$($profile.pressureLevel);rescue=$($profile.rescue)"
+             continue
+         }
+         $candidates += $candidate
+         $candidateRecords += New-TrimCandidateRecord $candidate $cmd "mode=$MemoryMode;pressure=$($profile.pressureLevel);rescue=$($profile.rescue)"
+         if ($candidates.Count -ge $profile.targetLimit) { break }
+     }
+     Write-Log "Trim candidates: effectiveMinMB=$($profile.effectiveMinProcessMB) raw=$($rawCandidates.Count) selected=$($candidates.Count) skippedSensitive=$skippedSensitive"
 
-    foreach ($proc in $candidates) {
-        try {
-            $handle = $proc.Handle
-            if ($handle -eq [IntPtr]::Zero) {
-                continue
-            }
-            if ([NativeMemoryTools]::EmptyWorkingSet($handle)) {
-                $trimmed++
-            }
-        } catch {}
-    }
+     if ($Mode -eq 'trim-plan') {
+         return [pscustomobject]@{
+             before = $before
+             trimPlan = [pscustomobject]@{
+                 memoryMode = $MemoryMode
+                 pressureLevel = $profile.pressureLevel
+                 allowSensitive = $profile.allowSensitive
+                 effectiveMinProcessMB = $profile.effectiveMinProcessMB
+                 rawCandidateLimit = $profile.rawLimit
+                 targetLimit = $profile.targetLimit
+                 rawCandidateCount = $rawCandidates.Count
+                 selectedCandidateCount = $candidates.Count
+                 skippedForegroundPid = $foregroundPid
+                 skippedSensitiveProcessCount = $skippedSensitive
+                 skippedSensitiveProcesses = @($skippedSensitiveRecords | Select-Object -First 40)
+                 candidates = @($candidateRecords | Select-Object -First 40)
+             }
+         }
+     }
+
+     $completedRecords = @()
+     for ($index = 0; $index -lt $candidates.Count; $index++) {
+         $proc = $candidates[$index]
+         $record = $candidateRecords[$index]
+         try {
+             $handle = $proc.Handle
+             if ($handle -eq [IntPtr]::Zero) {
+                 $completedRecords += Complete-TrimCandidateRecord $record $false 'empty-handle'
+                 continue
+             }
+             if ([NativeMemoryTools]::EmptyWorkingSet($handle)) {
+                 $trimmed++
+                 $completedRecords += Complete-TrimCandidateRecord $record $true
+             } else {
+                 $completedRecords += Complete-TrimCandidateRecord $record $false 'empty-working-set-returned-false'
+             }
+         } catch {
+             $completedRecords += Complete-TrimCandidateRecord $record $false $_.Exception.Message
+         }
+     }
 
     Start-Sleep -Milliseconds 800
     Set-Content -LiteralPath $stateFile -Value (Get-Date).ToString('o') -Encoding ASCII
@@ -964,14 +1236,20 @@ function Invoke-Trim {
         trimmedProcesses = $trimmed
         freedGB = $freedGB
         skippedForegroundPid = $foregroundPid
-        skippedSensitiveProcesses = $skippedSensitive
-        pressureSensitiveTrim = $pressureTrimSensitive
-        rawCandidateCount = $rawCandidates.Count
-        selectedCandidateCount = $candidates.Count
-    }
+         skippedSensitiveProcesses = $skippedSensitive
+         pressureSensitiveTrim = $profile.allowSensitive
+         memoryMode = $MemoryMode
+         pressureLevel = $before.pressureLevel
+         pressureScore = $before.pressureScore
+         effectiveMinProcessMB = $profile.effectiveMinProcessMB
+         rawCandidateCount = $rawCandidates.Count
+         selectedCandidateCount = $candidates.Count
+         targetLimit = $profile.targetLimit
+         targets = @($completedRecords | Sort-Object freedWorkingSetMB -Descending | Select-Object -First 30)
+     }
 }
 
-if ($Mode -eq 'trim') {
+if ($Mode -eq 'trim' -or $Mode -eq 'rescue' -or $Mode -eq 'trim-plan') {
     Invoke-Trim | ConvertTo-Json -Depth 6 -Compress
 } elseif ($Mode -eq 'codex-scan') {
     Get-CodexGuardScan | ConvertTo-Json -Depth 12 -Compress

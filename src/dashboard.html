@@ -13,8 +13,8 @@
       <span>MemGuard 设置</span>
     </div>
     <div class="window-controls">
-      <button id="minimizeWindow" type="button" aria-label="最小化">-</button>
-      <button id="closeWindow" type="button" aria-label="关闭">x</button>
+      <button id="minimizeWindow" type="button" aria-label="最小化">−</button>
+      <button id="closeWindow" type="button" aria-label="关闭">×</button>
     </div>
   </header>
   <main class="shell">
@@ -24,10 +24,23 @@
         <p id="subtitle">内存守护控制台</p>
       </div>
       <div class="actions">
-        <button id="refreshButton" type="button">刷新</button>
+        <button id="refreshButton" class="button-secondary" type="button">刷新</button>
+        <button id="trimPlanButton" class="button-secondary" type="button" title="只生成清理计划，不实际修剪进程。">预演清理</button>
         <button id="cleanButton" type="button">立即清理</button>
+        <button id="rescueButton" class="button-critical" type="button" title="高压或卡顿时使用，会触发更强的清理策略。">强制抢救</button>
       </div>
     </header>
+
+    <div id="actionStatus" class="action-status" aria-live="polite"></div>
+    <div id="trimPlanStatus" class="action-status trim-plan-status" aria-live="polite"></div>
+    <section id="pressureActionBar" class="pressure-action-bar pressure-action-normal" aria-live="polite">
+      <div>
+        <span id="pressureActionLabel">处置建议</span>
+        <strong id="pressureActionTitle">正在读取内存状态</strong>
+        <small id="pressureActionDetail">Dashboard 会根据压力等级和 Codex 候选给出下一步。</small>
+      </div>
+      <span id="pressureActionHint">--</span>
+    </section>
 
     <section class="metrics">
       <div class="metric main">
@@ -39,9 +52,24 @@
         <span class="label">可用内存</span>
         <strong id="freeGB">-- GB</strong>
       </div>
+      <div class="metric runtime-card">
+        <span class="label">自身占用</span>
+        <strong id="selfWorkingSet">-- MB</strong>
+        <small id="selfUsageDetail">--</small>
+      </div>
       <div class="metric">
         <span class="label">上次清理</span>
         <strong id="lastTrim">--</strong>
+      </div>
+      <div class="metric pressure-card">
+        <span class="label">压力等级</span>
+        <strong id="pressureLevel">--</strong>
+        <small id="pressureDetail">--</small>
+      </div>
+      <div class="metric schedule-card">
+        <span class="label">下次采样</span>
+        <strong id="nextSnapshotInterval">-- 秒</strong>
+        <small id="scheduleDetail">自适应</small>
       </div>
     </section>
 
@@ -50,47 +78,149 @@
         <div class="panel-head">
           <h2>基础设置</h2>
           <span id="saveState"></span>
+          <button id="applyLowResourceButton" class="button-secondary" type="button">应用低资源推荐</button>
         </div>
-        <label>
-          自动清理阈值 %
-          <input name="triggerPercent" type="number" min="50" max="98" step="1" />
-        </label>
-        <label>
-          单进程最低内存 MB
-          <input name="minProcessMB" type="number" min="50" max="2048" step="10" />
-        </label>
-        <label>
-          自动清理冷却分钟
-          <input name="cooldownMinutes" type="number" min="1" max="240" step="1" />
-        </label>
-        <label>
-          检查间隔秒
-          <input name="checkSeconds" type="number" min="5" max="300" step="1" />
-        </label>
-        <label>
-          连续高占用确认次数
-          <input name="consecutiveHighChecks" type="number" min="1" max="10" step="1" />
-        </label>
-        <label>
-          历史记录上限
-          <input name="historyLimit" type="number" min="10" max="500" step="10" />
-        </label>
-        <label class="checkbox">
-          <input name="trimOnStart" type="checkbox" />
-          启动时先清理一次
-        </label>
-        <label class="checkbox">
-          <input name="codexAutoCleanWhileRunning" type="checkbox" />
-          Codex 运行中自动清理旧会话
-        </label>
-        <label>
-          Codex 自动清理冷却分钟
-          <input name="codexAutoCleanWhileRunningCooldownMinutes" type="number" min="1" max="240" step="1" />
-        </label>
-        <label>
-          Codex 单轮最多结束
-          <input name="codexAutoCleanWhileRunningMaxKillsPerPass" type="number" min="1" max="100" step="1" />
-        </label>
+        <div class="settings-section">
+          <h3>内存策略</h3>
+          <div class="settings-grid">
+            <label>
+              自动清理阈值 %
+              <span class="field-hint">默认 85，越低越主动。</span>
+              <input name="triggerPercent" type="number" min="50" max="98" step="1" />
+            </label>
+            <label>
+              单进程最低内存 MB
+              <span class="field-hint">低于此值的进程不会被普通修剪命中。</span>
+              <input name="minProcessMB" type="number" min="50" max="2048" step="10" />
+            </label>
+            <label>
+              自动清理冷却分钟
+              <span class="field-hint">默认 20，避免频繁连续清理。</span>
+              <input name="cooldownMinutes" type="number" min="1" max="240" step="1" />
+            </label>
+            <label>
+              检查间隔秒
+              <span class="field-hint">默认 15，越短越灵敏也更常扫描。</span>
+              <input name="checkSeconds" type="number" min="5" max="300" step="1" />
+            </label>
+            <label>
+              连续确认次数
+              <span class="field-hint">默认 2，减少瞬时波动误触发。</span>
+              <input name="consecutiveHighChecks" type="number" min="1" max="10" step="1" />
+            </label>
+            <label>
+              历史记录上限
+              <span class="field-hint">只影响本地记录保留数量。</span>
+              <input name="historyLimit" type="number" min="10" max="500" step="10" />
+            </label>
+            <label class="span-2">
+              内存管理模式
+              <span class="field-hint">高强度更主动，均衡更保守。</span>
+              <select name="memoryMode">
+                <option value="aggressive">高强度智能</option>
+                <option value="balanced">均衡</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>启动与界面</h3>
+          <p class="setting-tip">低资源推荐：保持“低资源后台常驻”开启；默认禁用 GPU 加速以降低常驻私有内存，如遇到透明小窗黑屏或闪烁，可关闭后重启。</p>
+          <div class="check-list">
+            <label class="checkbox">
+              <input name="trimOnStart" type="checkbox" />
+              启动时先清理一次
+            </label>
+            <label class="checkbox">
+              <input name="lowResourceMode" type="checkbox" />
+              低资源后台常驻（隐藏小窗会释放窗口）
+            </label>
+            <label class="checkbox">
+              <input name="showWidgetOnStart" type="checkbox" />
+              启动时显示桌面小窗（会增加常驻占用）
+            </label>
+            <label class="checkbox">
+              <input name="disableHardwareAcceleration" type="checkbox" />
+              下次重启禁用 GPU 加速（默认推荐）
+            </label>
+            <label class="checkbox">
+              <input name="adaptiveCheckIntervalEnabled" type="checkbox" />
+              根据压力自动调整采样间隔
+            </label>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>Codex 自动清理</h3>
+          <p class="setting-tip">关键开关：守护总开关负责扫描和自动处理；退出后清理只处理旧会话残留；默认预演能避免误操作，确认后再执行真正清理。</p>
+          <div class="check-list">
+            <label class="checkbox">
+              <input name="codexGuardEnabled" type="checkbox" />
+              启用 Codex 守护扫描
+            </label>
+            <label class="checkbox">
+              <input name="codexAutoCleanAfterCodexExit" type="checkbox" />
+              Codex 退出后自动清理残留
+            </label>
+            <label class="checkbox">
+              <input name="codexAutoCleanWhileRunning" type="checkbox" />
+              运行中自动清理旧会话
+            </label>
+            <label class="checkbox">
+              <input name="codexDryRunByDefault" type="checkbox" />
+              默认先预演 Codex 清理
+            </label>
+          </div>
+          <label>
+            运行中策略
+            <span class="field-hint">建议保持高强度，只清理明确过期或断链的工具链。</span>
+            <select name="codexCleanWhileRunning">
+              <option value="allow-stale">高强度：允许清理过期孤儿链</option>
+              <option value="current-safe">智能：旧会话和重复链</option>
+              <option value="orphan-only">只清孤儿链</option>
+              <option value="report-only">只报告</option>
+            </select>
+          </label>
+          <div class="settings-grid">
+            <label>
+              冷却分钟
+              <span class="field-hint">默认 3，限制运行中自动清理频率。</span>
+              <input name="codexAutoCleanWhileRunningCooldownMinutes" type="number" min="1" max="240" step="1" />
+            </label>
+            <label>
+              单轮最多结束
+              <span class="field-hint">默认 48，防止一次处理过多目标。</span>
+              <input name="codexAutoCleanWhileRunningMaxKillsPerPass" type="number" min="1" max="100" step="1" />
+            </label>
+          </div>
+          <details class="advanced-settings">
+            <summary>高级阈值</summary>
+            <p class="field-hint">通常保持默认。调低会更积极，调高会更保守。</p>
+            <div class="settings-grid">
+              <label>
+                过期判定分钟
+                <span class="field-hint">默认 10，保护刚启动的工具链。</span>
+                <input name="codexStaleMinutes" type="number" min="1" max="240" step="1" />
+              </label>
+              <label>
+                MCP 数量压力
+                <span class="field-hint">默认 40，超过后视为 Codex 进程压力。</span>
+                <input name="codexMaxMcpProcesses" type="number" min="5" max="1000" step="5" />
+              </label>
+              <label>
+                提交内存压力 %
+                <span class="field-hint">默认 85，达到后更积极处理残留。</span>
+                <input name="codexCommitPressurePercent" type="number" min="50" max="99" step="1" />
+              </label>
+              <label>
+                守护扫描间隔秒
+                <span class="field-hint">默认 60，越短越灵敏也更常扫描。</span>
+                <input name="codexScanIntervalSeconds" type="number" min="15" max="600" step="5" />
+              </label>
+            </div>
+          </details>
+        </div>
         <button class="save" type="submit">保存设置</button>
       </form>
 
@@ -117,6 +247,7 @@
           <button id="codexScanButton" class="button-secondary" type="button">扫描</button>
           <button id="codexDryRunButton" class="button-secondary" type="button">预演</button>
           <button id="codexCleanButton" class="button-danger" type="button">清理残留</button>
+          <button id="codexRescueButton" class="button-critical" type="button">强制抢救</button>
         </div>
       </div>
       <div class="codex-summary">
@@ -149,11 +280,11 @@
           <h3>可清理 <span id="codexCleanableCount">--</span></h3>
           <div id="codexCleanableList" class="process-list"></div>
         </section>
-        <section class="process-column">
+        <section class="process-column process-column-protected">
           <h3>保护中 <span id="codexProtectedCount">--</span></h3>
           <div id="codexProtectedList" class="process-list"></div>
         </section>
-        <section class="process-column">
+        <section class="process-column process-column-suspicious">
           <h3>需人工确认 <span id="codexSuspiciousCount">--</span></h3>
           <div id="codexSuspiciousList" class="process-list"></div>
         </section>
