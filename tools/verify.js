@@ -161,6 +161,51 @@ function verifyPackageConfig() {
   assertVerify(afterPack.includes('MEMGUARD_KEEP_GPU_FALLBACKS'), 'afterPack.js must provide a GPU fallback escape hatch');
 }
 
+function verifyInstallerScripts() {
+  console.log('\n> installer scripts');
+  const installerScripts = [
+    'Install-MemGuard.ps1',
+    'Install-Portable.ps1',
+    'Stop-MemGuard.ps1',
+    'Uninstall-MemGuard.ps1',
+    'Status-MemGuard.ps1'
+  ];
+  for (const script of installerScripts) {
+    runCapture(`PowerShell parse ${script}`, powershell, [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      `$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile('${script.replace(/'/g, "''")}',[ref]$tokens,[ref]$errors)|Out-Null;if($errors){$errors|ForEach-Object{Write-Error $_.Message};exit 1}`
+    ]);
+  }
+
+  const install = fs.readFileSync(path.join(root, 'Install-MemGuard.ps1'), 'utf8');
+  const portable = fs.readFileSync(path.join(root, 'Install-Portable.ps1'), 'utf8');
+  for (const [name, text] of [['Install-MemGuard.ps1', install], ['Install-Portable.ps1', portable]]) {
+    assertVerify(text.includes('param(') && text.includes('[switch]$NoStart') && text.includes('[switch]$Quiet'), `${name} must support quiet no-start repair/install`);
+    assertVerify(text.includes('Test-MemGuardProcessForCurrentRoot'), `${name} must avoid duplicate launcher starts`);
+    assertVerify(text.includes('ForceSilentDefaults') && text.includes('codexPolicyVersion') && text.includes('$policyVersion -lt 3'), `${name} must migrate old configs without overwriting current V1.3 choices`);
+    assertVerify(text.includes('lowResourceMode') && text.includes('showWidgetOnStart') && text.includes('trimOnStart'), `${name} must know the silent background defaults`);
+  }
+
+  const uninstall = fs.readFileSync(path.join(root, 'Uninstall-MemGuard.ps1'), 'utf8');
+  assertVerify(uninstall.includes('Stop-MemGuard.ps1') && uninstall.includes('-UnregisterTask'), 'uninstall must reuse the scoped stop script and unregister the task');
+  assertVerify(uninstall.includes('wscript.exe'), 'uninstall fallback must also stop the launcher host');
+
+  const status = fs.readFileSync(path.join(root, 'Status-MemGuard.ps1'), 'utf8');
+  assertVerify(status.includes("Join-Path $env:APPDATA 'memguard\\data'"), 'status must inspect the real packaged app data directory');
+  assertVerify(status.includes('MEMGUARD_USER_DATA_DIR'), 'status must honor the isolated userData override');
+
+  const nsis = fs.readFileSync(path.join(root, 'build', 'installer.nsh'), 'utf8');
+  assertVerify(nsis.includes('-NonInteractive -WindowStyle Hidden'), 'NSIS PowerShell calls must stay hidden and non-interactive');
+  assertVerify(nsis.includes('-File "$INSTDIR\\Install-MemGuard.ps1" -Quiet'), 'NSIS install must run Install-MemGuard.ps1 quietly');
+  assertVerify(nsis.includes('Pop $0') && nsis.includes('Abort "MemGuard startup registration failed'), 'NSIS install must fail clearly if startup registration fails');
+  assertVerify(!nsis.includes("CommandLine -like ''*MemGuard*''"), 'NSIS fallback stop must be scoped to the install directory, not the word MemGuard');
+}
+
 function verifyRuntimeBenchmarkHelp() {
   const help = runCapture('runtime benchmark help', process.execPath, ['tools/runtime-benchmark.js', '--help']);
   assertVerify(help.includes('--mode <packed|dev>'), 'runtime benchmark help must document --mode packed|dev');
@@ -287,6 +332,7 @@ for (const file of [
 run('snapshot benchmark', process.execPath, ['src/snapshot-benchmark.js', '1000']);
 verifyCodexSelfTest();
 verifyPackageConfig();
+verifyInstallerScripts();
 verifyRuntimeBenchmarkHelp();
 verifySmokeHelp();
 verifyDashboardConfigBindings();

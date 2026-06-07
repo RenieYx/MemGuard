@@ -1,9 +1,9 @@
 !macro customInit
   DetailPrint "Preparing MemGuard upgrade..."
   ${if} ${FileExists} "$INSTDIR\Stop-MemGuard.ps1"
-    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\Stop-MemGuard.ps1" -Root "$INSTDIR" -Quiet'
+    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Stop-MemGuard.ps1" -Root "$INSTDIR" -Quiet'
   ${else}
-    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Stop-ScheduledTask -TaskName ''MemGuard'' -ErrorAction SilentlyContinue; Get-CimInstance Win32_Process | Where-Object { $$_.Name -in @(''MemGuard.exe'',''electron.exe'',''wscript.exe'') -and (($$_.CommandLine -like ''*MemGuard*'') -or ($$_.ExecutablePath -like ''*MemGuard*'')) } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"'
+    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "$$root = ''$INSTDIR''; Stop-ScheduledTask -TaskName ''MemGuard'' -ErrorAction SilentlyContinue; Get-CimInstance Win32_Process | Where-Object { $$_.Name -in @(''MemGuard.exe'',''electron.exe'',''wscript.exe'') -and (($$_.CommandLine -like (''*'' + $$root + ''*'')) -or ($$_.ExecutablePath -like (''*'' + $$root + ''*''))) } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"'
   ${endIf}
 !macroend
 
@@ -28,13 +28,19 @@
 
   ${if} ${FileExists} "$INSTDIR\Install-MemGuard.ps1"
     DetailPrint "Registering MemGuard startup task..."
-    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\Install-MemGuard.ps1"'
+    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Install-MemGuard.ps1" -Quiet'
+    Pop $0
+    ${if} $0 != 0
+      DetailPrint "MemGuard startup registration failed with exit code $0."
+      Abort "MemGuard startup registration failed. Please rerun the installer or use Install-or-Repair.bat."
+    ${endIf}
   ${endIf}
 !macroend
 
 !macro customUnInstall
   ${if} ${FileExists} "$INSTDIR\Uninstall-MemGuard.ps1"
     DetailPrint "Removing MemGuard startup task..."
-    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\Uninstall-MemGuard.ps1"'
+    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Uninstall-MemGuard.ps1" -Quiet'
+    Pop $0
   ${endIf}
 !macroend
