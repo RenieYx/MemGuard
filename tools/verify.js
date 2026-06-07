@@ -130,6 +130,12 @@ function verifyPackageConfig() {
   assertVerify(pkg.scripts && pkg.scripts['smoke:dashboard'] === 'node tools/dashboard-smoke.js', 'package.json must expose smoke:dashboard');
   assertVerify(pkg.scripts && pkg.scripts['smoke:widget'] === 'node tools/widget-smoke.js', 'package.json must expose smoke:widget');
   assertVerify(pkg.build && pkg.build.afterPack === 'build/afterPack.js', 'package.json must wire build/afterPack.js');
+  const nsisOptions = pkg.build && pkg.build.nsis ? pkg.build.nsis : {};
+  assertVerify(nsisOptions.oneClick === false, 'NSIS installer must use assisted mode');
+  assertVerify(nsisOptions.perMachine === false, 'NSIS installer must default to current-user install');
+  assertVerify(nsisOptions.allowElevation === false, 'NSIS installer must not offer all-users elevation on Windows 11');
+  assertVerify(nsisOptions.allowToChangeInstallationDirectory === true, 'NSIS installer must allow choosing an install path');
+  assertVerify(nsisOptions.include === 'build/installer.nsh', 'NSIS installer must include the custom installer script');
   const buildFiles = pkg && pkg.build && Array.isArray(pkg.build.files) ? pkg.build.files : [];
   const requiredRuntimeFiles = [
     'src/main.js',
@@ -200,7 +206,13 @@ function verifyInstallerScripts() {
   assertVerify(status.includes('MEMGUARD_USER_DATA_DIR'), 'status must honor the isolated userData override');
 
   const nsis = fs.readFileSync(path.join(root, 'build', 'installer.nsh'), 'utf8');
+  assertVerify(nsis.includes('!macro customInstallMode'), 'NSIS include must override install mode');
+  assertVerify(nsis.includes('StrCpy $isForceMachineInstall "0"'), 'NSIS install mode must disable forced all-users install');
+  assertVerify(nsis.includes('StrCpy $isForceCurrentInstall "1"'), 'NSIS install mode must force current-user install');
+  assertVerify(nsis.includes('!macro customCheckAppRunning'), 'NSIS installer must stop old instances during install, not before the wizard is shown');
+  assertVerify(!nsis.includes('!macro customInit'), 'NSIS installer must not run hidden PowerShell before the wizard is shown');
   assertVerify(nsis.includes('-NonInteractive -WindowStyle Hidden'), 'NSIS PowerShell calls must stay hidden and non-interactive');
+  assertVerify(nsis.includes('Get-ScheduledTask -TaskName') && nsis.includes('WorkingDirectory.IndexOf($$root'), 'NSIS fallback stop must only stop a scheduled task for the current install directory');
   assertVerify(nsis.includes('-File "$INSTDIR\\Install-MemGuard.ps1" -Quiet'), 'NSIS install must run Install-MemGuard.ps1 quietly');
   assertVerify(nsis.includes('Pop $0') && nsis.includes('Abort "MemGuard startup registration failed'), 'NSIS install must fail clearly if startup registration fails');
   assertVerify(!nsis.includes("CommandLine -like ''*MemGuard*''"), 'NSIS fallback stop must be scoped to the install directory, not the word MemGuard');
